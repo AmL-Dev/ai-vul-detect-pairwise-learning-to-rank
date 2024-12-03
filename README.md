@@ -31,7 +31,7 @@ The goal of this project is to
 - [transformers (4.46.3)](https://pypi.org/project/transformers/)
 - [Pytorch (2.5.1)](https://pypi.org/project/torch/)
 - [scikit-learn (1.5.2)](https://pypi.org/project/scikit-learn/)
-
+- [numpy]
 <!-- - [pandas (2.2.3)](https://pandas.pydata.org/) -->
 <!-- - [tqm (4.67.1)](https://tqdm.github.io/) -->
 
