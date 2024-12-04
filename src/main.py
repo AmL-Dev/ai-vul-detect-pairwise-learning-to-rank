@@ -22,15 +22,6 @@ from src.train_eval import train_one_epoch
 from src.train_eval import evaluate_model
 
 
-# TODO: Remove default values:
-primevul_paired_train_data_file = "/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_train_paired.jsonl"
-primevul_paired_test_data_file = "/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_test_paired.jsonl"
-primevul_paired_valid_data_file = "/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_valid_paired.jsonl"
-
-huggingface_model_name = "microsoft/codebert-base"
-output_dir = "/mnt/isgnas/home/anl31/documents/code/ai-vul-detect-pairwise-learning-to-rank/model_checkpoints"
-nb_epochs = 5
-
 def main(args):
     """
     Load data, train the model, evaluate results.
@@ -41,8 +32,6 @@ def main(args):
 
     # Configuration
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tokenizer = AutoTokenizer.from_pretrained(args.huggingface_model_name)
-    encoder = AutoModel.from_pretrained(args.huggingface_model_name).to(device)
     os.makedirs(args.output_dir, exist_ok=True)
 
     # ============================
@@ -61,23 +50,36 @@ def main(args):
     valid_loader = DataLoader(valid_dataset, batch_size=args.eval_batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=args.eval_batch_size, shuffle=False)
 
+
     # ============================
-    # Model Initialization
+    # Load model and tokenizer
     # ============================
+
+    # For distributed training 
+    if args.local_rank not in [-1, 0]:
+        torch.distributed.barrier()  # Barrier to make sure only the first process in distributed training download model & vocab
+
+    tokenizer = AutoTokenizer.from_pretrained(args.huggingface_embedder_name)
+    encoder = AutoModel.from_pretrained(args.huggingface_embedder_name).to(device)
 
     model = PairwiseRanker(tokenizer, encoder, device).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
+    start_epoch = 0
 
     # Load checkpoint if resuming training
-    checkpoint_path = args.output_dir + "/checkpoint_epoch_0.pt"  # Replace with actual path if resuming
-    start_epoch = 0
-    if os.path.exists(checkpoint_path):
-        model, optimizer, start_epoch = load_checkpoint(model, optimizer, checkpoint_path)
-        print(f"Resumed training from epoch {start_epoch}.")
+    if os.path.exists(args.checkpoint_path):
+        model, optimizer, start_epoch = load_checkpoint(model, optimizer, args.checkpoint_path)
+        LOGGER.info(f"Reload model from {args.checkpoint_path}, resume training from epoch {start_epoch}.")
+    
+    if args.local_rank == 0:
+        torch.distributed.barrier()  # End of barrier to make sure only the first process in distributed training download model & vocab
+
 
     # ============================
     # Training and Evaluation
     # ============================
+
+    LOGGER.info("Training/evaluation parameters %s", args)
 
     # Training
     num_epochs = args.nb_epochs
@@ -95,62 +97,74 @@ def main(args):
 
 # Example usage
 if __name__ == "__main__":
+    # =====================
+    # Parse input arguments
+    # =====================
+
     # Setup argument parser
     parser = argparse.ArgumentParser(description="Pairwise Learning to Rank Vulnerability Detection")
     
     # Commands related to general project setup
     parser.add_argument('--seed', type=int, default=42,
-                        help="random seed for initialization")
+                        help="Optional random seed for initialization") # Optional
     parser.add_argument("--no_cuda", action='store_true',
-                        help="Avoid using CUDA when available")
+                        help="Optional, avoid using CUDA when available") # Optional
 
     # Commands related to loading the dataset
-    parser.add_argument("--primevul_paired_train_data_file", default=primevul_paired_train_data_file, type=str, 
+    parser.add_argument("--primevul_paired_train_data_file", required=True, type=str, 
                         help="Path to the PrimeVul paired train data file.")
-    parser.add_argument("--primevul_paired_test_data_file", default=primevul_paired_test_data_file, type=str, 
-                        help="Path to the PrimeVul paired test data file.")
-    parser.add_argument("--primevul_paired_valid_data_file", default=primevul_paired_valid_data_file, type=str, 
+    parser.add_argument("--primevul_paired_valid_data_file", required=True, type=str, 
                         help="Path to the PrimeVul paired valid data file.")
+    parser.add_argument("--primevul_paired_test_data_file", required=True, type=str, 
+                        help="Path to the PrimeVul paired test data file.")
     
-    # Commands related to the model and training
-    parser.add_argument("--local_rank", type=int, default=-1,
-                        help="For distributed training: local_rank")
-    parser.add_argument("--output_dir", default=output_dir, type=str,
+    # Commands related to the models
+    parser.add_argument("--huggingface_embedder_name", required=True, type=str, 
+                        help="Name of the Hugging Face model used for embedding (and tokenizing).")
+    parser.add_argument("--checkpoint_path", default="", type=str, 
+                        help="Optional, path to the model checkpoint to continue training.") # Optional
+    parser.add_argument("--output_dir", required=True, type=str,
                         help="The output directory where the model predictions and checkpoints will be written.")
     
-    parser.add_argument("--huggingface_model_name", default=huggingface_model_name, type=str, 
-                        help="Name of the Hugging Face model used for embedding (and tokenizing).")
-    parser.add_argument("--train_batch_size", default=4, type=int,
+    # Commands related to training
+    parser.add_argument("--do_train", action='store_true',
+                        help="Optional, whether to run training.") # Optional
+    parser.add_argument("--local_rank", type=int, default=-1,
+                        help="Optional, For distributed training: local_rank") # Optional
+    parser.add_argument("--train_batch_size", required=True, type=int,
                         help="Batch size per GPU/CPU for training.")
-    parser.add_argument("--eval_batch_size", default=4, type=int,
+    parser.add_argument("--eval_batch_size", required=True, type=int,
                         help="Batch size per GPU/CPU for evaluation.")
-    
-    parser.add_argument('--nb_epochs', type=int, default=nb_epochs,
+    parser.add_argument('--nb_epochs', type=int, required=True,
                         help="Number of training epochs.")
 
     # Parse arguments
     args = parser.parse_args()
 
 
+    # ======================================
     # Setup CUDA, GPU & distributed training
+    # ======================================
     if args.local_rank == -1 or args.no_cuda:
         device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
         args.n_gpu = torch.cuda.device_count()
-    else:  # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
+    # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
+    else:
         torch.cuda.set_device(args.local_rank)
         device = torch.device("cuda", args.local_rank)
         torch.distributed.init_process_group(backend='nccl')
         args.n_gpu = 1
+
     args.device = device
     args.per_gpu_train_batch_size=args.train_batch_size//args.n_gpu
     args.per_gpu_eval_batch_size=args.eval_batch_size//args.n_gpu
-    # Initial logging
+
     LOGGER.warning("Process rank: %s, device: %s, n_gpu: %s, distributed training: %s",
                    args.local_rank, device, args.n_gpu, bool(args.local_rank != -1))
     
     
     # Set seed
-    set_seed(args.seed)
+    set_seed(args.seed)    
 
-    
+
     main(args)
