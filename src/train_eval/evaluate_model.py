@@ -1,45 +1,66 @@
 import torch
 import numpy as np
-from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score, roc_auc_score
-from transformers import AutoTokenizer
 
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, SequentialSampler
+from torch.utils.data.distributed import DistributedSampler
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, roc_auc_score
+
+from src.utils import LOGGER
+from src.data_prep import PairwiseDataset, SingletonDataset
 from src.model import PairwiseRanker 
+from src.train_eval import pairwise_loss
 
-def evaluate_model(model: PairwiseRanker, dataloader: DataLoader):
+def calculate_pairwise_metrics(vul_scores: np.array, benign_scores: np.array) -> dict[str, float]:
     """
-    Evaluate the model's pairwise ranking performance using accuracy.
+    Calculate model pairwise performance metrics based on vulnerable/benign pairs of model output scores.
 
     Args:
-        model (PairwiseRanker): Trained PairwiseRanker model.
-        dataloader (DataLoader): DataLoader containing pairs of vulnerable and benign samples.
+        pairwise_scores (list[tuple[float, float]]): vulnerable/benign pairs of model output scores.
+
     Returns:
-        accuracy: Pairwise accuracy of the model.
+        dict[str, float]: Dictionary of evaluation metrics and their values.  
     """
-    model.eval()
+
+    # Compute accuracy
     correct_pairs = 0
     total_pairs = 0
-
-    with torch.no_grad():
-        for batch in dataloader:
-            for code_vulnerable, code_benign in zip(batch["vulnerable_code"], batch["benign_code"]):
-                # Pass pairs through the model
-                score_vuln, score_benign = model(code_vulnerable, code_benign)
-
-                # Check if pair is ranked correctly
-                if score_vuln > score_benign:
-                    correct_pairs += 1
-                total_pairs += 1
-
+    for score_vuln, score_benign in zip(vul_scores, benign_scores):
+        if score_vuln > score_benign: # Check if pair is ranked correctly
+            correct_pairs += 1
+        total_pairs += 1
     accuracy = correct_pairs / total_pairs
-    return accuracy
 
+    result = {"eval_pairwise_acc": round(accuracy,4)*100}
+    return result
+
+
+def calculate_single_input_metrics(preds: np.array, labels: np.array) -> dict[str, float]:
+    acc=accuracy_score(labels, preds)
+    prec = precision_score(labels, preds)
+    recall = recall_score(labels, preds)
+    f1 = f1_score(labels, preds)
+    TN, FP, FN, TP = confusion_matrix(labels, preds).ravel()
+    tnr = TN/(TN+FP)
+    fpr = FP/(FP+TN)
+    fnr = FN/(TP+FN)
+    roc_auc = roc_auc_score(labels, preds)
+
+    result = {
+        "eval_acc": round(acc,4)*100,
+        "eval_prec": round(prec,4)*100,
+        "eval_recall": round(recall,4)*100,
+        "eval_f1": round(f1,4)*100,
+        "eval_tnr": round(tnr,4)*100,
+        "eval_fpr": round(fpr,4)*100,
+        "eval_fnr": round(fnr,4)*100,
+        "eval_roc_auc": round(roc_auc, 4)*100
+    }
+    return result
 
 
 def determine_optimal_threshold(
     model: PairwiseRanker,
     validation_data: DataLoader,
-    tokenizer: AutoTokenizer,
     device: torch.device,
     thresholds: np.ndarray = np.arange(-1.0, 1.01, 0.01)
 ) -> tuple[float, dict[str, float]]:
@@ -62,15 +83,12 @@ def determine_optimal_threshold(
     # Compute scores for all validation samples
     with torch.no_grad():
         for batch in validation_data:
-            for code_vulnerable, code_benign in zip(batch["vulnerable_code"], batch["benign_code"]):
-                # Pass pairs through the model
-                score_vuln = model.compute_rank_score(code_vulnerable)
-                scores.append(score_vuln)
-                y_true.append(1)
-                
-                score_benign = model.compute_rank_score(code_benign)
-                scores.append(score_benign)
-                y_true.append(0)
+            for code_snippet, label in zip(batch[0].to(device), batch[1].to(device)):
+                with torch.no_grad():
+                    # Pass pairs through the model
+                    rank_score = model.compute_rank_score(code_snippet)
+                    scores.append(rank_score)
+                    y_true.append(label)
 
     # Evaluate metrics for each threshold
     best_threshold = None
@@ -80,92 +98,151 @@ def determine_optimal_threshold(
     for threshold in thresholds:
         y_pred = [1 if score > threshold else 0 for score in scores]
 
-        metric_scores = {
-            "accuracy": accuracy_score(y_true, y_pred),
-            "precision": precision_score(y_true, y_pred, zero_division=0),
-            "recall": recall_score(y_true, y_pred, zero_division=0),
-            "f1_score": f1_score(y_true, y_pred, zero_division=0),
-            "roc_auc": roc_auc_score(y_true, y_pred)
-        }
+        metric_scores = calculate_single_input_metrics(y_pred, y_true)    
 
         # Update if F1-score improves
-        if metric_scores["roc_auc"] > best_auc:
-            best_auc = metric_scores["roc_auc"]
+        if metric_scores["eval_roc_auc"] > best_auc:
+            best_auc = metric_scores["eval_roc_auc"]
             best_threshold = threshold
             best_metric_scores = metric_scores
 
     return best_threshold, best_metric_scores
 
 
-
-def evaluate_single_input_classification(
-    model: PairwiseRanker, 
-    test_data: list[tuple[str, int]], 
-    tokenizer: AutoTokenizer, 
-    device: torch.device, 
-    threshold: float = 0.0
-) -> dict[str, float]:
+def evaluate_model(model: PairwiseRanker, eval_pairwise_dataloader: DataLoader, eval_single_dataloader: DataLoader, eval_class_threshold_single_dataloader: DataLoader, device: torch.device):
     """
-    Evaluate the performance of the binary classification task with only one input code snippet.
-
-    Args:
-        model (PairwiseRanker): The trained model.
-        test_data (List[Tuple[str, int]]): A list of tuples where each tuple contains a code snippet 
-                                           (str) and its ground truth label (int).
-        tokenizer (AutoTokenizer): Tokenizer for encoding the code.
-        device (torch.device): Device (CPU or GPU) to run the model.
-        threshold (float): Decision threshold for classification (default=0.0).
-
-    Returns:
-        Dict[str, float]: Dictionary containing accuracy, F1-score, precision, and recall.
+    Evaluate model pairwise and single-input classification performance on the respective eval dataset
     """
+    
     model.eval()
-    y_true, y_pred = [], []
-
-    for code_snippet, label in test_data:
-        # Tokenize and encode the input code
-        inputs = tokenizer(code_snippet, return_tensors="pt", padding=True, truncation=True, max_length=512)
-        inputs = {k: v.to(device) for k, v in inputs.items()}
-
+    
+    ### Evaluate model for pairwise performance 
+    # (i.e. ability to rank pairs correctly with score of vulnerable samples higher)
+    eval_loss = 0.0
+    nb_eval_steps = 0
+    vul_scores=[] 
+    benign_scores=[] 
+    
+    for batch in eval_pairwise_dataloader:
+        code_vulnerable = batch["vulnerable_code"].to(device)
+        code_benign = batch["benign_code"].to(device)
+        # pairwise forward pass and loss
         with torch.no_grad():
-            # Encode the input code and calculate its score
-            enc_code = model.encode(inputs["input_ids"], inputs["attention_mask"])
-            score = model.fc(enc_code).item()
-
-        # Apply threshold to classify
-        predicted_label = 1 if score > threshold else 0
-
-        # Store ground truth and prediction
-        y_true.append(label)
-        y_pred.append(predicted_label)
-
-    # Calculate evaluation metrics
-    metrics = {
-        "accuracy": accuracy_score(y_true, y_pred),
-        "f1_score": f1_score(y_true, y_pred),
-        "precision": precision_score(y_true, y_pred),
-        "recall": recall_score(y_true, y_pred),
-    }
+            score_vuln, score_benign = model(code_vulnerable, code_benign)
+            loss = pairwise_loss(score_vuln, score_benign)
+            eval_loss += loss.mean().item()
+            vul_scores.append(score_vuln.cpu().numpy())
+            benign_scores.append(score_benign.cpu().numpy())
+        nb_eval_steps += 1
+    # Aggregate results from all batches
+    vul_scores=np.concatenate(vul_scores,0)
+    benign_scores=np.concatenate(benign_scores,0)
+    # Evaluate results
+    eval_loss = eval_loss / nb_eval_steps
+    perplexity = torch.tensor(eval_loss)
+    pairwise_metrics = calculate_pairwise_metrics(vul_scores, benign_scores)
     
-    return metrics
 
+    ### Evaluate model for single input performance 
+    # (i.e. ability to classify correctly sample as vulnerable or not)
+    threshold = determine_optimal_threshold(model, eval_class_threshold_single_dataloader, device)
+    
+    single_input_scores=[]
+    single_input_scores, y_true = [], []
 
-# def evaluate_model(model, dataloader):
-#     """
-#     Evaluate the model using AUC.
-#     """
-#     model.eval()
-#     y_true, y_scores = [], []
-
-#     with torch.no_grad():
-#         for batch in dataloader:
-#             code_vulnerable = batch["vulnerable_code"]
-#             code_benign = batch["benign_code"]
+    for batch in eval_single_dataloader:
+        inputs = batch[0].to(device)        
+        label=batch[1].to(device)
+        with torch.no_grad():
+            rank_scores = model.compute_rank_score(inputs)
+            single_input_scores.append(rank_scores.cpu().numpy())
+            y_true.append(label.cpu().numpy())
+        nb_eval_steps += 1
+    single_input_scores=np.concatenate(single_input_scores,0)
+    y_true=np.concatenate(y_true,0)
             
-#             score_vuln, score_benign = model(code_vulnerable, code_benign)
-#             scores = (score_vuln - score_benign).squeeze().cpu().numpy()
-#             y_true.extend([1] * len(score_vuln) + [0] * len(score_benign))
-#             y_scores.extend(scores.tolist() + (-scores).tolist())
+    # Apply threshold to classify
+    y_preds = single_input_scores[:,1] > threshold
+
+    single_input_metrics = calculate_single_input_metrics(y_preds, y_true)    
     
-#     auc = roc_auc_score(y_true, y_scores)
-#     return auc
+
+    result = {"eval_loss": float(perplexity)}
+    result.update(pairwise_metrics)
+    result.update(single_input_metrics)
+    return result
+
+
+def validate(
+        model: PairwiseRanker,
+        primevul_paired_valid_data_file: str,
+        primevul_single_input_valid_dataset: str,
+        eval_batch_size: int,
+        local_rank: int,
+        n_gpu: int,
+        device: torch.device,
+        eval_when_training: bool = False):
+
+    ### Load and batch the pairwise valid dataset 
+    eval_pairwise_dataset = PairwiseDataset(primevul_paired_valid_data_file)
+    eval_pairwise_sampler = SequentialSampler(eval_pairwise_dataset) if local_rank == -1 else DistributedSampler(eval_pairwise_dataset) # Note that DistributedSampler samples randomly
+    eval_pairwise_dataloader = DataLoader(eval_pairwise_dataset, sampler=eval_pairwise_sampler, batch_size=eval_batch_size)
+
+    ### Load and batch the singleton valid dataset (for binary classification performance analysis)
+    eval_singleton_dataset = SingletonDataset(primevul_single_input_valid_dataset)
+    eval_singleton_sampler = SequentialSampler(eval_singleton_dataset) if local_rank == -1 else DistributedSampler(eval_singleton_dataset) # Note that DistributedSampler samples randomly
+    eval_singleton_dataloader = DataLoader(eval_singleton_dataset, sampler=eval_singleton_sampler, batch_size=eval_batch_size)
+
+    # multi-gpu evaluate
+    if n_gpu > 1 and eval_when_training is False:
+        model = torch.nn.DataParallel(model)
+
+    ### Evaluate the model
+    LOGGER.info("***** Running evaluation *****")
+    LOGGER.info("  Num pairwise examples = %d", len(eval_pairwise_dataset))
+    LOGGER.info("  Num single input examples = %d", len(eval_singleton_dataset))
+    LOGGER.info("  Batch size = %d", eval_batch_size)
+    
+    return evaluate_model(model, eval_pairwise_dataloader, eval_singleton_dataloader, eval_singleton_dataloader, device)
+
+
+def test(
+        model: PairwiseRanker,
+        primevul_paired_test_data_file: str,
+        primvul_singleton_test_dataset: str,
+        primvul_singleton_valid_dataset_for_class_threshold: str,
+        eval_batch_size: int,
+        local_rank: int,
+        n_gpu: int,
+        device: torch.device,
+        eval_when_training: bool = False):
+
+    ### Load and batch the pairwise test dataset 
+    eval_pairwise_dataset = PairwiseDataset(primevul_paired_test_data_file)
+    eval_pairwise_sampler = SequentialSampler(eval_pairwise_dataset) if local_rank == -1 else DistributedSampler(eval_pairwise_dataset) # Note that DistributedSampler samples randomly
+    eval_pairwise_dataloader = DataLoader(eval_pairwise_dataset, sampler=eval_pairwise_sampler, batch_size=eval_batch_size)
+
+    ### Load and batch the singleton test dataset (for binary classification performance analysis)
+    test_singleton_dataset = SingletonDataset(primvul_singleton_test_dataset)
+    test_singleton_sampler = SequentialSampler(test_singleton_dataset) if local_rank == -1 else DistributedSampler(test_singleton_dataset) # Note that DistributedSampler samples randomly
+    test_singleton_dataloader = DataLoader(test_singleton_dataset, sampler=test_singleton_sampler, batch_size=eval_batch_size)
+
+    ### Load and batch the singleton valid dataset (to determine optimal rank score threshold classification )
+    valid_singleton_dataset = SingletonDataset(primvul_singleton_valid_dataset_for_class_threshold)
+    valid_singleton_sampler = SequentialSampler(valid_singleton_dataset) if local_rank == -1 else DistributedSampler(valid_singleton_dataset) # Note that DistributedSampler samples randomly
+    valid_singleton_dataloader = DataLoader(valid_singleton_dataset, sampler=valid_singleton_sampler, batch_size=eval_batch_size)
+
+    
+
+    # multi-gpu evaluate
+    if n_gpu > 1 and eval_when_training is False:
+        model = torch.nn.DataParallel(model)
+
+    ### Evaluate the model
+    LOGGER.info("***** Running Test *****")
+    LOGGER.info("  Num pairwise examples = %d", len(eval_pairwise_dataset))
+    LOGGER.info("  Num single input examples = %d", len(test_singleton_dataloader))
+    LOGGER.info("  Batch size = %d", eval_batch_size)
+    
+    return evaluate_model(model, eval_pairwise_dataloader, test_singleton_dataloader, valid_singleton_dataloader, device)
+
