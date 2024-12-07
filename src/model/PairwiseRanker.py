@@ -17,8 +17,9 @@ class PairwiseRanker(torch.nn.Module):
         super(PairwiseRanker, self).__init__()
         self.tokenizer = tokenizer
         self.encoder = encoder
+        dim_encoder_output = encoder.config.hidden_size # embeddings outputs dim 
         self.device = device
-        self.fc = torch.nn.Linear(768, 1)  # CodeBERT outputs 768-dim embeddings
+        self.fc = torch.nn.Linear(dim_encoder_output, 1)  
         self.activation = torch.nn.Tanh()  # Activation function to bound output to [-1, 1]
 
 

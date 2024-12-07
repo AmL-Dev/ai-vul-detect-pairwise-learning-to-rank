@@ -32,6 +32,10 @@ The goal of this project is to
 - [Pytorch (2.5.1)](https://pypi.org/project/torch/)
 - [scikit-learn (1.5.2)](https://pypi.org/project/scikit-learn/)
 - [numpy]
+- For BigBird:
+    - [tiktoken (0.8.0)](https://pypi.org/project/tiktoken/)
+    - [sentencepiece (0.2.0)](https://pypi.org/project/sentencepiece/)
+    - [protobuf (5.29.1)](https://protobuf.dev/getting-started/pythontutorial/)
 <!-- - [pandas (2.2.3)](https://pandas.pydata.org/) -->
 <!-- - [tqm (4.67.1)](https://tqdm.github.io/) -->
 

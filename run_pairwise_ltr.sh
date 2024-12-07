@@ -13,7 +13,8 @@ PRIMEVUL_SINGLE_INPUT_TEST_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/Prim
 # PRIMEVUL_SINGLE_INPUT_TEST_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_valid_16pts.jsonl"
 
 # Commands related to the models
-HUGGINGFACE_EMBEDDER_NAME="microsoft/codebert-base"
+# HUGGINGFACE_EMBEDDER_NAME="microsoft/codebert-base"
+HUGGINGFACE_EMBEDDER_NAME="google/bigbird-roberta-base"
 OUTPUT_DIR="/mnt/isgnas/home/anl31/documents/code/ai-vul-detect-pairwise-learning-to-rank/model_checkpoints"
 
 # Commands related to training

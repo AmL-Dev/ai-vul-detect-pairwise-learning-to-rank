@@ -88,7 +88,7 @@ def determine_optimal_threshold(
             for code_snippet, label in zip(batch["func"], batch["label"]):
                 with torch.no_grad():
                     # Pass pairs through the model
-                    rank_score = model.compute_rank_score(code_snippet)
+                    rank_score = model.module.compute_rank_score(code_snippet)
                     scores.append(rank_score)
                     y_true.append(label)
 
@@ -156,7 +156,7 @@ def evaluate_model(model: PairwiseRanker, eval_pairwise_dataloader: DataLoader, 
         inputs = batch["func"]     
         label=batch["label"]
         with torch.no_grad():
-            rank_scores = model.compute_rank_score(inputs)
+            rank_scores = model.module.compute_rank_score(inputs)
             single_input_scores.append(rank_scores.cpu().numpy())
             y_true.append(label.cpu().numpy())
         nb_eval_steps += 1
