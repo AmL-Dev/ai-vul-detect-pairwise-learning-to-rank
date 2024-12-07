@@ -40,6 +40,7 @@ def calculate_single_input_metrics(preds: np.array, labels: np.array) -> dict[st
     recall = recall_score(labels, preds, zero_division=0)
     f1 = f1_score(labels, preds, zero_division=0)
     TN, FP, FN, TP = confusion_matrix(labels, preds).ravel()
+    tpr = TP/(TP+FN)
     tnr = TN/(TN+FP)
     fpr = FP/(FP+TN)
     fnr = FN/(TP+FN)
@@ -50,6 +51,7 @@ def calculate_single_input_metrics(preds: np.array, labels: np.array) -> dict[st
         "eval_prec": round(prec,4)*100,
         "eval_recall": round(recall,4)*100,
         "eval_f1": round(f1,4)*100,
+        "eval_tpr": round(tpr,4)*100,
         "eval_tnr": round(tnr,4)*100,
         "eval_fpr": round(fpr,4)*100,
         "eval_fnr": round(fnr,4)*100,
@@ -62,7 +64,7 @@ def determine_optimal_threshold(
     model: PairwiseRanker,
     validation_data: DataLoader,
     device: torch.device,
-    thresholds: np.ndarray = np.arange(-1.0, 1.01, 0.01)
+    thresholds: np.ndarray = np.arange(-0.5, 0.51, 0.01)
 ) -> tuple[float, dict[str, float]]:
     """
     Determine the optimal threshold for binary classification based on validation data.
@@ -208,13 +210,17 @@ def validate(
 def test(
         model: PairwiseRanker,
         primevul_paired_test_data_file: str,
-        primvul_singleton_test_dataset: str,
+        primevul_single_input_test_dataset: str,
         primvul_singleton_valid_dataset_for_class_threshold: str,
-        eval_batch_size: int,
+        per_gpu_eval_batch_size: int,
         local_rank: int,
         n_gpu: int,
-        device: torch.device,
-        eval_when_training: bool = False):
+        device: torch.device):
+    """
+    Test trained model performance at pairwise ranking and at classifying single inputs.
+    """
+    
+    eval_batch_size = per_gpu_eval_batch_size * max(1, n_gpu)
 
     ### Load and batch the pairwise test dataset 
     eval_pairwise_dataset = PairwiseDataset(primevul_paired_test_data_file)
@@ -222,7 +228,7 @@ def test(
     eval_pairwise_dataloader = DataLoader(eval_pairwise_dataset, sampler=eval_pairwise_sampler, batch_size=eval_batch_size)
 
     ### Load and batch the singleton test dataset (for binary classification performance analysis)
-    test_singleton_dataset = SingletonDataset(primvul_singleton_test_dataset)
+    test_singleton_dataset = SingletonDataset(primevul_single_input_test_dataset)
     test_singleton_sampler = SequentialSampler(test_singleton_dataset) if local_rank == -1 else DistributedSampler(test_singleton_dataset) # Note that DistributedSampler samples randomly
     test_singleton_dataloader = DataLoader(test_singleton_dataset, sampler=test_singleton_sampler, batch_size=eval_batch_size)
 
@@ -234,13 +240,13 @@ def test(
     
 
     # multi-gpu evaluate
-    if n_gpu > 1 and eval_when_training is False:
+    if n_gpu > 1:
         model = torch.nn.DataParallel(model)
 
     ### Evaluate the model
     LOGGER.info("***** Running Test *****")
     LOGGER.info("  Num pairwise examples = %d", len(eval_pairwise_dataset))
-    LOGGER.info("  Num single input examples = %d", len(test_singleton_dataloader))
+    LOGGER.info("  Num single input examples = %d", len(test_singleton_dataset))
     LOGGER.info("  Batch size = %d", eval_batch_size)
     
     return evaluate_model(model, eval_pairwise_dataloader, test_singleton_dataloader, valid_singleton_dataloader, device)

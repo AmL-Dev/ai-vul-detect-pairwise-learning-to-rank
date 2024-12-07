@@ -1,3 +1,22 @@
+#!/bin/bash
+# **************************
+# MODIFY THESE OPTIONS
+
+#SBATCH --partition=isg
+#SBATCH --constraint=vram80+ 
+#SBATCH --nodes=1
+#SBATCH --cpus-per-task=256
+#SBATCH --gres=gpu:4
+#SBATCH --job-name=prvl_01
+#SBATCH -o primevul_01_percent_data_log-%N.%j.out
+#SBATCH --time=48:0:0
+
+# MODIFY THESE OPTIONS
+# **************************
+
+source /mnt/isgnas/home/anl31/miniconda3/etc/profile.d/conda.sh
+conda activate ai-vul-detect-pair-ltr
+
 # Commands related to general project setup
 SEED=42
 

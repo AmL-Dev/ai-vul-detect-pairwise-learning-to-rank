@@ -80,7 +80,15 @@ def main(args):
         output_dir = os.path.join(args.output_dir, '{}'.format(checkpoint_prefix))  
         model.load_state_dict(torch.load(output_dir))                  
         model.to(args.device)
-        result=test(args, model, tokenizer)
+        result=test(
+            model,
+            args.primevul_paired_test_data_file,
+            args.primevul_single_input_test_dataset,
+            args.primevul_single_input_valid_dataset,
+            args.per_gpu_eval_batch_size,
+            args.local_rank,
+            args.n_gpu,
+            args.device)
         LOGGER.info("***** Test results *****")
         for key in sorted(result.keys()):
             LOGGER.info("  %s = %s", key, str(round(result[key],4)))
@@ -109,6 +117,8 @@ if __name__ == "__main__":
                         help="Path to the PrimeVul paired test data file.")
     parser.add_argument("--primevul_single_input_valid_dataset", required=True, type=str, 
                         help="Path to the PrimeVul non-paired valid data file.")
+    parser.add_argument("--primevul_single_input_test_dataset", required=True, type=str, 
+                        help="Path to the PrimeVul non-paired test data file.")
     
     # Commands related to the models
     parser.add_argument("--huggingface_embedder_name", required=True, type=str, 
