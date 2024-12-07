@@ -4,10 +4,13 @@
 # Set project location to be able to call project modules 
 import sys
 sys.path.append("/mnt/isgnas/home/anl31/documents/code/ai-vul-detect-pairwise-learning-to-rank")
+
+# TODO: Remove this and put tokenizer in PairwiseDataset 
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 #########################################################################
 
 import argparse
-import os
 import torch
 from transformers import AutoTokenizer, AutoModel
 
@@ -63,11 +66,11 @@ def main(args):
         # Load training data
         if args.local_rank not in [-1, 0]:
             torch.distributed.barrier()  # Barrier to make sure only the first process in distributed training process the dataset, and the others will use the cache
-        train_dataset = PairwiseDataset(args.primevul_paired_train_data_file, tokenizer)
+        train_dataset = PairwiseDataset(args.primevul_paired_train_data_file)
         if args.local_rank == 0:
             torch.distributed.barrier()
         
-        train(args, train_dataset, model, tokenizer)
+        train(args, train_dataset, model)
         
     # ============================
     # Testing

@@ -1,5 +1,5 @@
 import torch
-from transformers import PreTrainedTokenizer, PreTrainedModel
+from transformers import AutoTokenizer, AutoModel
 
 class PairwiseRanker(torch.nn.Module):
     """
@@ -9,11 +9,11 @@ class PairwiseRanker(torch.nn.Module):
     It encodes pairs of vulnerable and benign code snippets and computes a ranking score for each.
 
     Args:
-        tokenizer (PreTrainedTokenizer): Tokenizer for the CodeBERT model.
+        tokenizer (AutoTokenizer): Tokenizer for the CodeBERT model.
         encoder (PreTrainedModel): Pretrained CodeBERT model for encoding code snippets.
         device (torch.device): Device (CPU or GPU) to run the model.
     """
-    def __init__(self, tokenizer: PreTrainedTokenizer, encoder: PreTrainedModel, device: torch.device):
+    def __init__(self, tokenizer: AutoTokenizer, encoder: AutoModel, device: torch.device):
         super(PairwiseRanker, self).__init__()
         self.tokenizer = tokenizer
         self.encoder = encoder
@@ -73,7 +73,7 @@ class PairwiseRanker(torch.nn.Module):
             torch.Tensor: Encoded representations of the code snippets (shape: [batch_size, 768]).
         """
         # Tokenize the input batch
-        inputs = self.tokenizer(code_batch, return_tensors="pt", padding=True, truncation=True, max_length=512)
+        inputs = self.tokenizer(code_batch, return_tensors="pt", padding=True, truncation=True)
         inputs = {k: v.to(self.device) for k, v in inputs.items()} #Transform tokenized input tensors to appropriate device
 
         # Pass through the encoder

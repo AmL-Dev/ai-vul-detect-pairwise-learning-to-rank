@@ -36,9 +36,9 @@ def calculate_pairwise_metrics(vul_scores: np.array, benign_scores: np.array) ->
 
 def calculate_single_input_metrics(preds: np.array, labels: np.array) -> dict[str, float]:
     acc=accuracy_score(labels, preds)
-    prec = precision_score(labels, preds)
-    recall = recall_score(labels, preds)
-    f1 = f1_score(labels, preds)
+    prec = precision_score(labels, preds, zero_division=0)
+    recall = recall_score(labels, preds, zero_division=0)
+    f1 = f1_score(labels, preds, zero_division=0)
     TN, FP, FN, TP = confusion_matrix(labels, preds).ravel()
     tnr = TN/(TN+FP)
     fpr = FP/(FP+TN)
@@ -83,7 +83,7 @@ def determine_optimal_threshold(
     # Compute scores for all validation samples
     with torch.no_grad():
         for batch in validation_data:
-            for code_snippet, label in zip(batch[0].to(device), batch[1].to(device)):
+            for code_snippet, label in zip(batch["func"], batch["label"]):
                 with torch.no_grad():
                     # Pass pairs through the model
                     rank_score = model.compute_rank_score(code_snippet)
@@ -124,8 +124,8 @@ def evaluate_model(model: PairwiseRanker, eval_pairwise_dataloader: DataLoader, 
     benign_scores=[] 
     
     for batch in eval_pairwise_dataloader:
-        code_vulnerable = batch["vulnerable_code"].to(device)
-        code_benign = batch["benign_code"].to(device)
+        code_vulnerable = batch["vulnerable_code"]
+        code_benign = batch["benign_code"]
         # pairwise forward pass and loss
         with torch.no_grad():
             score_vuln, score_benign = model(code_vulnerable, code_benign)
@@ -145,27 +145,26 @@ def evaluate_model(model: PairwiseRanker, eval_pairwise_dataloader: DataLoader, 
 
     ### Evaluate model for single input performance 
     # (i.e. ability to classify correctly sample as vulnerable or not)
-    threshold = determine_optimal_threshold(model, eval_class_threshold_single_dataloader, device)
+    threshold = determine_optimal_threshold(model, eval_class_threshold_single_dataloader, device)[0]
     
-    single_input_scores=[]
-    single_input_scores, y_true = [], []
+    single_input_scores= []
+    y_true = []
 
     for batch in eval_single_dataloader:
-        inputs = batch[0].to(device)        
-        label=batch[1].to(device)
+        inputs = batch["func"]     
+        label=batch["label"]
         with torch.no_grad():
             rank_scores = model.compute_rank_score(inputs)
             single_input_scores.append(rank_scores.cpu().numpy())
             y_true.append(label.cpu().numpy())
         nb_eval_steps += 1
-    single_input_scores=np.concatenate(single_input_scores,0)
+    single_input_scores=np.concatenate(single_input_scores).flatten()
     y_true=np.concatenate(y_true,0)
             
     # Apply threshold to classify
-    y_preds = single_input_scores[:,1] > threshold
+    y_preds = single_input_scores > threshold
 
     single_input_metrics = calculate_single_input_metrics(y_preds, y_true)    
-    
 
     result = {"eval_loss": float(perplexity)}
     result.update(pairwise_metrics)

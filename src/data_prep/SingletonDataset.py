@@ -10,7 +10,7 @@ class SingletonDataset(Dataset):
         - func (code snippet)
         - label (vulnerable or benign)
     """
-    def __init__(self, file_path: str, tokenizer: PreTrainedTokenizer):
+    def __init__(self, file_path: str):
         self.singletons = self.load_singletons_from_jsonl(file_path)
 
     def __len__(self):

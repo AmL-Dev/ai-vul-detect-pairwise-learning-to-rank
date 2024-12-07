@@ -2,10 +2,13 @@
 SEED=42
 
 # Commands related to loading the dataset
-PRIMEVUL_PAIRED_TRAIN_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_train_paired.jsonl"
+# PRIMEVUL_PAIRED_TRAIN_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_train_paired.jsonl"
+PRIMEVUL_PAIRED_TRAIN_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_train_paired_16pts.jsonl"
 PRIMEVUL_PAIRED_TEST_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_test_paired.jsonl"
-PRIMEVUL_PAIRED_VALID_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_valid_paired.jsonl"
-PRIMEVUL_SINGLE_INPUT_VALID_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_valid.jsonl"
+# PRIMEVUL_PAIRED_VALID_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_valid_paired.jsonl"
+PRIMEVUL_PAIRED_VALID_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_valid_paired_16pts.jsonl"
+# PRIMEVUL_SINGLE_INPUT_VALID_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_valid.jsonl"
+PRIMEVUL_SINGLE_INPUT_VALID_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_valid_16pts.jsonl"
 
 # Commands related to the models
 HUGGINGFACE_EMBEDDER_NAME="microsoft/codebert-base"
@@ -15,7 +18,7 @@ OUTPUT_DIR="/mnt/isgnas/home/anl31/documents/code/ai-vul-detect-pairwise-learnin
 LEARNING_RATE=5e-5
 TRAIN_BATCH_SIZE=8
 EVAL_BATCH_SIZE=8
-NB_EPOCHS=5
+NB_EPOCHS=2
 
 python ./src/main.py \
     --seed=${SEED} \
@@ -26,7 +29,6 @@ python ./src/main.py \
     --huggingface_embedder_name=${HUGGINGFACE_EMBEDDER_NAME} \
     --output_dir=${OUTPUT_DIR} \
     --do_train \
-    --do_test \
     --evaluate_during_training \
     --learning_rate=${LEARNING_RATE} \
     --train_batch_size=${TRAIN_BATCH_SIZE} \

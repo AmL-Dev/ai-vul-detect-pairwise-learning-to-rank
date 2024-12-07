@@ -29,7 +29,7 @@ from torch.utils.data.distributed import DistributedSampler
 from src.utils import LOGGER
 from src.train_eval import validate, pairwise_loss
 
-def train(args, train_dataset, model, tokenizer):
+def train(args, train_dataset, model):
     """ Train the model """ 
     
     # ============================
@@ -98,12 +98,11 @@ def train(args, train_dataset, model, tokenizer):
         bar = tqdm(train_dataloader,total=len(train_dataloader))
         tr_num=0
         train_loss=0
-        # vul_scores=[] 
         # benign_scores=[] 
-
+        # vul_scores=[] 
         for local_step, batch in enumerate(bar):
-            code_vulnerable = batch["vulnerable_code"].to(args.device)
-            code_benign = batch["benign_code"].to(args.device)
+            code_vulnerable = batch["vulnerable_code"]
+            code_benign = batch["benign_code"]
             
             ### Forward pass and loss
             score_vuln, score_benign = model(code_vulnerable, code_benign)
@@ -113,7 +112,6 @@ def train(args, train_dataset, model, tokenizer):
             loss = pairwise_loss(score_vuln, score_benign)
             if args.n_gpu > 1:
                 loss = loss.mean()  # mean() to average on multi-gpu parallel training
-            
 
             ### Gradient descent (prevent exploding gradients)
             loss.backward() 
