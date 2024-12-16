@@ -2,15 +2,18 @@
 SEED=42
 
 # Commands related to loading the dataset
+# Commands related to loading the dataset
 PRIMEVUL_PAIRED_TRAIN_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_train_paired.jsonl"
-# PRIMEVUL_PAIRED_TRAIN_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_train_paired_16pts.jsonl"
-PRIMEVUL_PAIRED_TEST_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_test_paired.jsonl"
 PRIMEVUL_PAIRED_VALID_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_valid_paired.jsonl"
-# PRIMEVUL_PAIRED_VALID_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_valid_paired_16pts.jsonl"
 PRIMEVUL_SINGLE_INPUT_VALID_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_valid.jsonl"
-# PRIMEVUL_SINGLE_INPUT_VALID_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_valid_16pts.jsonl"
 PRIMEVUL_SINGLE_INPUT_TEST_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_test.jsonl"
+PRIMEVUL_PAIRED_TEST_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_test_paired.jsonl"
+
+# PRIMEVUL_PAIRED_TRAIN_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_train_paired_16pts.jsonl"
+# PRIMEVUL_PAIRED_VALID_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_valid_paired_16pts.jsonl"
+# PRIMEVUL_SINGLE_INPUT_VALID_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_valid_16pts.jsonl"
 # PRIMEVUL_SINGLE_INPUT_TEST_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_valid_16pts.jsonl"
+# PRIMEVUL_PAIRED_TEST_DATA_FILE="/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_test_paired.jsonl"
 
 # Commands related to the models
 # HUGGINGFACE_EMBEDDER_NAME="microsoft/codebert-base"

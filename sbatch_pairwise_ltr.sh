@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=256
 #SBATCH --gres=gpu:4
 #SBATCH --job-name=ltr
-#SBATCH -o learning_to_rank_log-%N.%j.out
+#SBATCH -o learning_to_rank_bigbird_log-%N.%j.out
 #SBATCH --time=48:0:0
 
 # MODIFY THESE OPTIONS

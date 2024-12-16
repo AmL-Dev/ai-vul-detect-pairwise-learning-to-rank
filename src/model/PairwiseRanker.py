@@ -57,8 +57,8 @@ class PairwiseRanker(torch.nn.Module):
         enc = self.encode(code_batch)
 
         # Compute ranking scores
-        enc = self.fc(enc)
-        score = self.activation(enc)
+        x = self.fc(enc)
+        score = self.activation(x)
 
         return score
 
@@ -80,9 +80,21 @@ class PairwiseRanker(torch.nn.Module):
         # Pass through the encoder
         outputs = self.encoder(**inputs).last_hidden_state
 
-        # Use the [CLS] token embedding representation.
+        # Use the [CLS] token embedding representation (ensure that the model has [CLS] token).
         # CodeBERT's [CLS] token (the first token of the sequence) is trained 
         # to capture global contextual information from the entire sequence.
-        embeddings = outputs[:, 0, :]
+        # embeddings = outputs[:, 0, :]
+
+        ### Mean pooling across tokens
+        # Mask to ignore padding tokens during pooling
+        attention_mask = inputs["attention_mask"]  # Shape: (batch_size, sequence_length)
+        mask = attention_mask.unsqueeze(-1).expand(outputs.size())  # Shape: (batch_size, sequence_length, hidden_size)
+        masked_outputs = outputs * mask  # Zero out padding token embeddings
+
+        # Sum the embeddings and divide by the number of non-padded tokens
+        masked_outputs = outputs * mask  # Zero out padding token embeddings
+        embeddings = masked_outputs.sum(dim=1) / attention_mask.sum(dim=1, keepdim=True)  # Shape: (batch_size, hidden_size)
+        
         # embeddings = outputs.mean(dim=1)
+        
         return embeddings

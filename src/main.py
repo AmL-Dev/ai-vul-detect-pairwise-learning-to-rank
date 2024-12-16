@@ -43,7 +43,7 @@ def main(args):
     encoder = AutoModel.from_pretrained(args.huggingface_embedder_name).to(args.device)
 
     model = PairwiseRanker(tokenizer, encoder, args.device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     args.start_epoch = 0
     # TODO Check the use of this var
     args.start_step = 0 

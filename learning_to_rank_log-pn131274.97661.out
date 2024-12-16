@@ -1,65 +1,0 @@
-12/06/2024 22:26:56 - WARNING - Pairwise LTR -   Process rank: -1, device: cuda, n_gpu: 4, distributed training: False
-12/06/2024 22:26:59 - INFO - Pairwise LTR -   Training/evaluation parameters Namespace(seed=42, no_cuda=False, primevul_paired_train_data_file='/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_train_paired_16pts.jsonl', primevul_paired_valid_data_file='/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_valid_paired_16pts.jsonl', primevul_paired_test_data_file='/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_test_paired.jsonl', primevul_single_input_valid_dataset='/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_valid_16pts.jsonl', primevul_single_input_test_dataset='/mnt/isgnas/home/anl31/documents/data/PrimeVul_v0.1/primevul_valid_16pts.jsonl', huggingface_embedder_name='microsoft/codebert-base', checkpoint_path='', do_train=True, do_test=True, max_patience=100, local_rank=-1, learning_rate=5e-05, train_batch_size=64, eval_batch_size=128, nb_epochs=2, max_grad_norm=1.0, output_dir='/mnt/isgnas/home/anl31/documents/code/ai-vul-detect-pairwise-learning-to-rank/model_checkpoints', run_dir='runs', evaluate_during_training=True, logging_steps=1000, n_gpu=4, device=device(type='cuda'), per_gpu_train_batch_size=16, per_gpu_eval_batch_size=32, start_epoch=0, start_step=0)
-12/06/2024 22:26:59 - INFO - Pairwise LTR -   ***** Running training *****
-12/06/2024 22:26:59 - INFO - Pairwise LTR -     Num examples = 8
-12/06/2024 22:26:59 - INFO - Pairwise LTR -     Num Epochs = 2
-12/06/2024 22:26:59 - INFO - Pairwise LTR -     Instantaneous batch size per GPU = 16
-12/06/2024 22:26:59 - INFO - Pairwise LTR -     Total train batch size (w. parallel, distributed & accumulation) = 64
-  0%|          | 0/1 [00:00<?, ?it/s]epoch 0 loss -0.6913580894470215:   0%|          | 0/1 [00:02<?, ?it/s]epoch 0 loss -0.6913580894470215: 100%|██████████| 1/1 [00:02<00:00,  2.89s/it]epoch 0 loss -0.6913580894470215: 100%|██████████| 1/1 [00:02<00:00,  2.92s/it]
-12/06/2024 22:27:02 - INFO - Pairwise LTR -   ***** Running evaluation *****
-12/06/2024 22:27:02 - INFO - Pairwise LTR -     Num pairwise examples = 8
-12/06/2024 22:27:02 - INFO - Pairwise LTR -     Num single input examples = 16
-12/06/2024 22:27:02 - INFO - Pairwise LTR -     Batch size = 128
-12/06/2024 22:27:03 - INFO - Pairwise LTR -     eval_loss = -0.6943
-12/06/2024 22:27:03 - INFO - Pairwise LTR -     eval_pairwise_acc = 37.5
-12/06/2024 22:27:03 - INFO - Pairwise LTR -     eval_acc = 68.75
-12/06/2024 22:27:03 - INFO - Pairwise LTR -     eval_prec = 16.67
-12/06/2024 22:27:03 - INFO - Pairwise LTR -     eval_recall = 100.0
-12/06/2024 22:27:03 - INFO - Pairwise LTR -     eval_f1 = 28.57
-12/06/2024 22:27:03 - INFO - Pairwise LTR -     eval_tpr = 100.0
-12/06/2024 22:27:03 - INFO - Pairwise LTR -     eval_tnr = 66.67
-12/06/2024 22:27:03 - INFO - Pairwise LTR -     eval_fpr = 33.33
-12/06/2024 22:27:03 - INFO - Pairwise LTR -     eval_fnr = 0.0
-12/06/2024 22:27:03 - INFO - Pairwise LTR -     eval_roc_auc = 83.33
-12/06/2024 22:27:03 - INFO - Pairwise LTR -     ********************
-12/06/2024 22:27:03 - INFO - Pairwise LTR -     Best f1:28.57
-12/06/2024 22:27:03 - INFO - Pairwise LTR -     ********************
-12/06/2024 22:27:04 - INFO - Pairwise LTR -   Saving best f1 model checkpoint at epoch 0 to /mnt/isgnas/home/anl31/documents/code/ai-vul-detect-pairwise-learning-to-rank/model_checkpoints/checkpoint-best-f1/model.bin
-12/06/2024 22:27:04 - INFO - Pairwise LTR -     ********************
-12/06/2024 22:27:04 - INFO - Pairwise LTR -     Best acc:68.75
-12/06/2024 22:27:04 - INFO - Pairwise LTR -     ********************
-12/06/2024 22:27:06 - INFO - Pairwise LTR -   Saving best acc model checkpoint at epoch 0 to /mnt/isgnas/home/anl31/documents/code/ai-vul-detect-pairwise-learning-to-rank/model_checkpoints/checkpoint-best-acc/model.bin
-  0%|          | 0/1 [00:00<?, ?it/s]epoch 1 loss -0.71913:   0%|          | 0/1 [00:00<?, ?it/s]epoch 1 loss -0.71913: 100%|██████████| 1/1 [00:00<00:00,  1.68it/s]epoch 1 loss -0.71913: 100%|██████████| 1/1 [00:00<00:00,  1.47it/s]
-12/06/2024 22:27:06 - INFO - Pairwise LTR -   ***** Running evaluation *****
-12/06/2024 22:27:06 - INFO - Pairwise LTR -     Num pairwise examples = 8
-12/06/2024 22:27:06 - INFO - Pairwise LTR -     Num single input examples = 16
-12/06/2024 22:27:06 - INFO - Pairwise LTR -     Batch size = 128
-12/06/2024 22:27:07 - INFO - Pairwise LTR -     eval_loss = -0.6956
-12/06/2024 22:27:07 - INFO - Pairwise LTR -     eval_pairwise_acc = 50.0
-12/06/2024 22:27:07 - INFO - Pairwise LTR -     eval_acc = 68.75
-12/06/2024 22:27:07 - INFO - Pairwise LTR -     eval_prec = 16.67
-12/06/2024 22:27:07 - INFO - Pairwise LTR -     eval_recall = 100.0
-12/06/2024 22:27:07 - INFO - Pairwise LTR -     eval_f1 = 28.57
-12/06/2024 22:27:07 - INFO - Pairwise LTR -     eval_tpr = 100.0
-12/06/2024 22:27:07 - INFO - Pairwise LTR -     eval_tnr = 66.67
-12/06/2024 22:27:07 - INFO - Pairwise LTR -     eval_fpr = 33.33
-12/06/2024 22:27:07 - INFO - Pairwise LTR -     eval_fnr = 0.0
-12/06/2024 22:27:07 - INFO - Pairwise LTR -     eval_roc_auc = 83.33
-/mnt/isgnas/home/anl31/documents/code/ai-vul-detect-pairwise-learning-to-rank/./src/main.py:81: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
-  model.load_state_dict(torch.load(output_dir))
-12/06/2024 22:27:08 - INFO - Pairwise LTR -   ***** Running Test *****
-12/06/2024 22:27:08 - INFO - Pairwise LTR -     Num pairwise examples = 435
-12/06/2024 22:27:08 - INFO - Pairwise LTR -     Num single input examples = 16
-12/06/2024 22:27:08 - INFO - Pairwise LTR -     Batch size = 128
-12/06/2024 22:27:15 - INFO - Pairwise LTR -   ***** Test results *****
-12/06/2024 22:27:15 - INFO - Pairwise LTR -     eval_acc = 68.75
-12/06/2024 22:27:15 - INFO - Pairwise LTR -     eval_f1 = 28.57
-12/06/2024 22:27:15 - INFO - Pairwise LTR -     eval_fnr = 0.0
-12/06/2024 22:27:15 - INFO - Pairwise LTR -     eval_fpr = 33.33
-12/06/2024 22:27:15 - INFO - Pairwise LTR -     eval_loss = -0.6942
-12/06/2024 22:27:15 - INFO - Pairwise LTR -     eval_pairwise_acc = 29.66
-12/06/2024 22:27:15 - INFO - Pairwise LTR -     eval_prec = 16.67
-12/06/2024 22:27:15 - INFO - Pairwise LTR -     eval_recall = 100.0
-12/06/2024 22:27:15 - INFO - Pairwise LTR -     eval_roc_auc = 83.33
-12/06/2024 22:27:15 - INFO - Pairwise LTR -     eval_tnr = 66.67
-12/06/2024 22:27:15 - INFO - Pairwise LTR -     eval_tpr = 100.0

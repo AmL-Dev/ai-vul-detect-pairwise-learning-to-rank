@@ -79,7 +79,7 @@ def train(args, train_dataset, model):
                 args.train_batch_size * (torch.distributed.get_world_size() if args.local_rank != -1 else 1))
 
     global_step = args.start_step
-    tr_loss, logging_loss,avg_loss,tr_nb,tr_num,train_loss = 0.0, 0.0,0.0,0,0,0
+    avg_loss = 0.0
     best_f1=0.0
     best_acc=0.0
     patience = 0
@@ -93,60 +93,47 @@ def train(args, train_dataset, model):
     # ============================
     # Actual training
     # ============================
-    step = 0
-    for idx in range(args.start_epoch, int(args.num_train_epochs)): 
+    for epoch in range(args.start_epoch, int(args.num_train_epochs)): 
         bar = tqdm(train_dataloader,total=len(train_dataloader))
-        tr_num=0
-        train_loss=0
-        # benign_scores=[] 
-        # vul_scores=[] 
+        cumul_train_loss=0 # Tracks cumulative loss
         for local_step, batch in enumerate(bar):
             code_vulnerable = batch["vulnerable_code"]
             code_benign = batch["benign_code"]
             
             ### Forward pass and loss
             score_vuln, score_benign = model(code_vulnerable, code_benign)
-            # vul_scores.append(score_vuln.cpu().numpy())
-            # benign_scores.append(score_benign.cpu().numpy())
             
             loss = pairwise_loss(score_vuln, score_benign)
             if args.n_gpu > 1:
                 loss = loss.mean()  # mean() to average on multi-gpu parallel training
 
-            ### Gradient descent (prevent exploding gradients)
-            loss.backward() 
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+            ### Gradient descent
+            optimizer.zero_grad() # Clear gradients for next train
+            loss.backward() # Backpropagation, compute gradients
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm) # Prevent exploding gradients
+            optimizer.step() # Apply gradients
 
+            # Log gradients stats
+            ######################################################################################################################################
+            # log_gradients(model, epoch, global_step, LOGGER)
 
             ### Update training stats and move to prepare moving to the next iteration
-            tr_loss += loss.item()
-            tr_num+=1
-            train_loss+=loss.item()
-            avg_loss = round(train_loss/tr_num,5) if avg_loss!=0 else tr_loss
-            bar.set_description(f"epoch {idx} loss {avg_loss}")
+            cumul_train_loss+=loss.item()
+            avg_loss = round(cumul_train_loss/(local_step + 1),5) #if avg_loss!=0 else tr_loss
+            bar.set_description(f"Epoch {epoch}, Step {global_step}, Loss: {avg_loss}")
 
-            optimizer.step()
-            optimizer.zero_grad()
-            global_step += 1
             # Tracks the exponential rate of change in the training loss over a specific number of steps. 
             # Useful to monitor a smoothed loss trend in training processes.
-            avg_loss=round(np.exp((tr_loss - logging_loss) /(global_step - tr_nb)),4)
-            if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
-                logging_loss = tr_loss
-                tr_nb=global_step
+            # avg_loss=round(np.exp((tr_loss - logging_loss) /(global_step + 1 - tr_nb)),4)
+            # if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
+            #     logging_loss = tr_loss
+            #     tr_nb=global_step
 
 
             ### Log after every logging_steps and save model if better performance
-            if (step + 1) % args.logging_steps == 0 and args.local_rank == -1 and args.evaluate_during_training: # Only evaluate when single GPU otherwise metrics may not average well
-                avg_loss=round(train_loss/tr_num,5)
-                
-                # Aggregate results from all batches
-                # vul_scores=np.concatenate(vul_scores,0)
-                # benign_scores=np.concatenate(benign_scores,0)
+            if (global_step + 1) % args.logging_steps == 0 and args.local_rank == -1 and args.evaluate_during_training: # Only evaluate when single GPU otherwise metrics may not average well
 
                 ### Evaluate model
-                # Train perf
-                # train_pairwise_metrics = calculate_pairwise_metrics(vul_scores, benign_scores)
                 # Valid perf
                 results = validate(
                     model, 
@@ -175,23 +162,23 @@ def train(args, train_dataset, model):
                     model_to_save = model.module if hasattr(model,'module') else model
                     output_dir = os.path.join(output_dir, f'model.bin') 
                     torch.save(model_to_save.state_dict(), output_dir)
-                    LOGGER.info(f"Saving best f1 model checkpoint at epoch {idx} step {step} to {output_dir}")   
+                    LOGGER.info(f"Saving best f1 model checkpoint at epoch {epoch} step {global_step} to {output_dir}")   
 
-            # increment step within the same epoch
-            step += 1
+            # increment global step
+            global_step += 1
         
         ### log after every epoch
         if args.local_rank in [-1, 0]:
             # save model checkpoint at ep10
-            if idx == 9:
+            if epoch == 9:
                 checkpoint_prefix = f'checkpoint-acsac/'
                 output_dir = os.path.join(args.output_dir, '{}'.format(checkpoint_prefix))                        
                 if not os.path.exists(output_dir):
                     os.makedirs(output_dir)                        
                 model_to_save = model.module if hasattr(model,'module') else model
-                output_dir = os.path.join(output_dir, f'model-ep{idx}.bin') 
+                output_dir = os.path.join(output_dir, f'model-ep{epoch}.bin') 
                 torch.save(model_to_save.state_dict(), output_dir)
-                LOGGER.info(f"ACSAC: Saving model checkpoint at epoch {idx} to {output_dir}")
+                LOGGER.info(f"ACSAC: Saving model checkpoint at epoch {epoch} to {output_dir}")
 
             if args.local_rank == -1 and args.evaluate_during_training:  # Only evaluate when single GPU otherwise metrics may not average well
                 results = validate(
@@ -221,7 +208,7 @@ def train(args, train_dataset, model):
                     model_to_save = model.module if hasattr(model,'module') else model
                     output_dir = os.path.join(output_dir, f'model.bin') 
                     torch.save(model_to_save.state_dict(), output_dir)
-                    LOGGER.info(f"Saving best f1 model checkpoint at epoch {idx} to {output_dir}")
+                    LOGGER.info(f"Saving best f1 model checkpoint at epoch {epoch} to {output_dir}")
                     patience = 0
                 else:
                     patience += 1
@@ -239,7 +226,7 @@ def train(args, train_dataset, model):
                     model_to_save = model.module if hasattr(model,'module') else model
                     output_dir = os.path.join(output_dir, f'model.bin') 
                     torch.save(model_to_save.state_dict(), output_dir)
-                    LOGGER.info(f"Saving best acc model checkpoint at epoch {idx} to {output_dir}")
+                    LOGGER.info(f"Saving best acc model checkpoint at epoch {epoch} to {output_dir}")
                     patience = 0
                 else:
                     patience += 1 
@@ -259,3 +246,24 @@ def train(args, train_dataset, model):
             break
 
     # writer.close()
+
+def log_gradients(model, epoch, step, logger=None):
+    """
+    Logs the gradients of model parameters, including L2 norms.
+    If `logger` is provided, logs will be sent there. Otherwise, prints to stdout.
+    """
+    for name, param in model.named_parameters():
+        if param.grad is not None:
+            grad_mean = param.grad.mean().item()
+            grad_std = param.grad.std().item()
+            grad_max = param.grad.max().item()
+            grad_min = param.grad.min().item()
+            grad_norm = param.grad.norm(2).item()  # L2 norm of gradients
+            message = (f"Epoch {epoch}, Step {step}, Param: {name}, "
+                       f"Grad Mean: {grad_mean:.4e}, Grad Std: {grad_std:.4e}, "
+                       f"Grad Max: {grad_max:.4e}, Grad Min: {grad_min:.4e}, "
+                       f"Grad Norm (L2): {grad_norm:.4e}")
+            if logger:
+                logger.info(message)
+            else:
+                print(message)
