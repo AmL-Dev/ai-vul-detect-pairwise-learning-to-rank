@@ -3,6 +3,7 @@
 
 import os
 import torch
+import wandb
 
 def load_checkpoint(model, optimizer, checkpoint_path):
     """
@@ -21,11 +22,6 @@ import numpy as np
 from torch.utils.data import DataLoader, RandomSampler
 from torch.utils.data.distributed import DistributedSampler
 
-# try:
-#     from torch.utils.tensorboard import SummaryWriter
-# except:
-#     from tensorboardX import SummaryWriter
-
 from src.utils import LOGGER
 from src.train_eval import validate, pairwise_loss
 
@@ -35,6 +31,9 @@ def train(args, train_dataset, model):
     # ============================
     # Initial Configuration
     # ============================
+
+    # Track gradients
+    wandb.watch(model, pairwise_loss, log="all", log_freq=5)
 
     # Randomly batch the training dataset 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu) # Set batch size
@@ -83,12 +82,6 @@ def train(args, train_dataset, model):
     best_f1=0.0
     best_acc=0.0
     patience = 0
-
-    # To log training stats
-    short_comment_str = args.output_dir.split('/')[-1]
-    tensorboard_logdir = f'{args.run_dir}/{short_comment_str}'
-    # TODO DELETE
-    # writer = SummaryWriter(tensorboard_logdir)
     
     # ============================
     # Actual training
@@ -112,15 +105,17 @@ def train(args, train_dataset, model):
             loss.backward() # Backpropagation, compute gradients
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm) # Prevent exploding gradients
             optimizer.step() # Apply gradients
-
+                              
             # Log gradients stats
             ######################################################################################################################################
             # log_gradients(model, epoch, global_step, LOGGER)
 
             ### Update training stats and move to prepare moving to the next iteration
-            cumul_train_loss+=loss.item()
-            avg_loss = round(cumul_train_loss/(local_step + 1),5) #if avg_loss!=0 else tr_loss
-            bar.set_description(f"Epoch {epoch}, Step {global_step}, Loss: {avg_loss}")
+            # cumul_train_loss+=loss.item()
+            # avg_loss = round(cumul_train_loss/(local_step + 1),5) #if avg_loss!=0 else tr_loss
+            bar.set_description(f"Epoch {epoch}, Step {global_step}, Loss: {loss}")
+            # log metrics to wandb
+            wandb.log({"train_loss": loss}, step=global_step)
 
             # Tracks the exponential rate of change in the training loss over a specific number of steps. 
             # Useful to monitor a smoothed loss trend in training processes.
@@ -147,6 +142,9 @@ def train(args, train_dataset, model):
                 
                 for key, value in results.items():
                     LOGGER.info("  %s = %s", key, round(value,4))
+
+                # log validation metrics to wandb
+                wandb.log(results, step=global_step)
 
                 # Save model checkpoint    
                 if results['eval_f1']>best_f1:
@@ -194,6 +192,9 @@ def train(args, train_dataset, model):
                 for key, value in results.items():
                     LOGGER.info("  %s = %s", key, round(value,4))
                 
+                # log validation metrics to wandb
+                wandb.log(results, step=global_step)
+
                 # Save model checkpoint    
                 if results['eval_f1']>best_f1:
                     best_f1=results['eval_f1']
@@ -245,7 +246,6 @@ def train(args, train_dataset, model):
                 LOGGER.info("Saving model checkpoint to %s", output_dir)
             break
 
-    # writer.close()
 
 def log_gradients(model, epoch, step, logger=None):
     """
