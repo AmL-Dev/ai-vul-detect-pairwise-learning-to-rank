@@ -13,6 +13,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import argparse
 import torch
 from transformers import AutoTokenizer, AutoModel
+import wandb
 
 from src.utils import LOGGER
 from src.utils import set_seed
@@ -31,70 +32,94 @@ def main(args):
         args (argparse.Namespace): Parsed command-line arguments.
     """
 
-    # ============================
-    # Load model and tokenizer
-    # ============================
+    # start a new wandb run to track this script
+    with wandb.init(
+        # set the wandb project where this run will be logged
+        project="ai-vul-detect-pairwise-learning-to-rank",
 
-    # For distributed training 
-    if args.local_rank not in [-1, 0]:
-        torch.distributed.barrier()  # Barrier to make sure only the first process in distributed training download model & vocab
+        # track hyperparameters and run metadata
+        config={
+            "architecture": f"{args.huggingface_embedder_name} + FC",
+            "dataset": {args.primevul_paired_train_data_file},
+            "learning_rate": args.learning_rate,
+            "epochs": args.nb_epochs,
+            "batch_size": args.train_batch_size,
+        }
+    ):
 
-    tokenizer = AutoTokenizer.from_pretrained(args.huggingface_embedder_name)
-    encoder = AutoModel.from_pretrained(args.huggingface_embedder_name).to(args.device)
+        # ============================
+        # Load model and tokenizer
+        # ============================
 
-    model = PairwiseRanker(tokenizer, encoder, args.device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
-    args.start_epoch = 0
-    # TODO Check the use of this var
-    args.start_step = 0 
-
-    # Load checkpoint if resuming training
-    if os.path.exists(args.checkpoint_path):
-        model, optimizer, args.start_epoch = load_checkpoint(model, optimizer, args.checkpoint_path)
-        LOGGER.info(f"Reload model from {args.checkpoint_path}, resume training from epoch {args.start_epoch}.")
-    
-    if args.local_rank == 0:
-        torch.distributed.barrier()  # End of barrier to make sure only the first process in distributed training download model & vocab
-
-
-    # ============================
-    # Training
-    # ============================
-    LOGGER.info("Training/evaluation parameters %s", args)
-
-    if args.do_train:
-        # Load training data
+        # For distributed training 
         if args.local_rank not in [-1, 0]:
-            torch.distributed.barrier()  # Barrier to make sure only the first process in distributed training process the dataset, and the others will use the cache
-        train_dataset = PairwiseDataset(args.primevul_paired_train_data_file)
+            torch.distributed.barrier()  # Barrier to make sure only the first process in distributed training download model & vocab
+
+        tokenizer = AutoTokenizer.from_pretrained(args.huggingface_embedder_name)
+        encoder = AutoModel.from_pretrained(args.huggingface_embedder_name).to(args.device)
+
+        model = PairwiseRanker(tokenizer, encoder, args.device)
+
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+        args.start_epoch = 0
+        # TODO Check the use of this var
+        args.start_step = 0 
+
+        # Load checkpoint if resuming training
+        if os.path.exists(args.checkpoint_path):
+            model, optimizer, args.start_epoch = load_checkpoint(model, optimizer, args.checkpoint_path)
+            LOGGER.info(f"Reload model from {args.checkpoint_path}, resume training from epoch {args.start_epoch}.")
+        
         if args.local_rank == 0:
-            torch.distributed.barrier()
-        
-        train(args, train_dataset, model)
-        
-    # ============================
-    # Testing
-    # ============================
-    if args.do_test and args.local_rank in [-1, 0]:
-        checkpoint_prefix = f'checkpoint-best-f1/model.bin'
-        output_dir = os.path.join(args.output_dir, '{}'.format(checkpoint_prefix))  
-        model.load_state_dict(torch.load(output_dir))                  
-        model.to(args.device)
-        result=test(
-            model,
-            args.primevul_paired_test_data_file,
-            args.primevul_single_input_test_dataset,
-            args.primevul_single_input_valid_dataset,
-            args.per_gpu_eval_batch_size,
-            args.local_rank,
-            args.n_gpu,
-            args.device)
-        LOGGER.info("***** Test results *****")
-        for key in sorted(result.keys()):
-            LOGGER.info("  %s = %s", key, str(round(result[key],4)))
+            torch.distributed.barrier()  # End of barrier to make sure only the first process in distributed training download model & vocab
+
+
+        # ============================
+        # Training
+        # ============================
+        LOGGER.info("Training/evaluation parameters %s", args)
+
+        if args.do_train:
+            # Load training data
+            if args.local_rank not in [-1, 0]:
+                torch.distributed.barrier()  # Barrier to make sure only the first process in distributed training process the dataset, and the others will use the cache
+            train_dataset = PairwiseDataset(args.primevul_paired_train_data_file)
+            if args.local_rank == 0:
+                torch.distributed.barrier()
+            
+            train(args, train_dataset, model)
+            
+        # ============================
+        # Testing
+        # ============================
+        if args.do_test and args.local_rank in [-1, 0]:
+            checkpoint_prefix = f'checkpoint-best-f1/model.bin'
+            output_dir = os.path.join(args.output_dir, '{}'.format(checkpoint_prefix))  
+            model.load_state_dict(torch.load(output_dir))                  
+            model.to(args.device)
+            test_results=test(
+                model,
+                args.primevul_paired_test_data_file,
+                args.primevul_single_input_test_dataset,
+                args.primevul_single_input_valid_dataset,
+                args.per_gpu_eval_batch_size,
+                args.local_rank,
+                args.n_gpu,
+                args.device)
+            LOGGER.info("***** Test results *****")
+            for key in sorted(test_results.keys()):
+                LOGGER.info("  %s = %s", key, str(round(test_results[key],4)))
+            
+            # log test metrics to wandb
+            # wandb.log(test_results)
+            # log validation metrics to wandb
+            wandb.log({"test_loss": test_results['eval_loss']})
+            wandb.log({"test_pairwise_acc": test_results['eval_pairwise_acc']})
+
 
 
 if __name__ == "__main__":
+
     # =====================
     # Parse input arguments
     # =====================
@@ -150,11 +175,9 @@ if __name__ == "__main__":
     # Track results and training stats
     parser.add_argument("--output_dir", required=True, type=str,
                         help="The output directory where the model predictions and checkpoints will be written.")
-    parser.add_argument('--run_dir', type=str, default="runs", 
-                        help="Parent directory to store run stats.") # Optional
     parser.add_argument("--evaluate_during_training", action='store_true',
                         help="Run evaluation during training at each logging step.")
-    parser.add_argument('--logging_steps', type=int, default=1000,
+    parser.add_argument('--logging_steps', type=int, default=512,
                         help="Log every X updates steps.") # Optional
     
 

@@ -80,6 +80,7 @@ def determine_optimal_threshold(
         Tuple[float, Dict[str, float]]: The optimal threshold and a dictionary of performance metrics.
     """
     model.eval()
+    model = model.module if hasattr(model,'module') else model
     y_true, scores = [], []
 
     # Compute scores for all validation samples
@@ -88,7 +89,7 @@ def determine_optimal_threshold(
             for code_snippet, label in zip(batch["func"], batch["label"]):
                 with torch.no_grad():
                     # Pass pairs through the model
-                    rank_score = model.module.compute_rank_score(code_snippet)
+                    rank_score = model.compute_rank_score(code_snippet)
                     scores.append(rank_score)
                     y_true.append(label)
 
@@ -151,12 +152,14 @@ def evaluate_model(model: PairwiseRanker, eval_pairwise_dataloader: DataLoader, 
     
     single_input_scores= []
     y_true = []
+    
+    model = model.module if hasattr(model,'module') else model
 
     for batch in eval_single_dataloader:
         inputs = batch["func"]     
         label=batch["label"]
         with torch.no_grad():
-            rank_scores = model.module.compute_rank_score(inputs)
+            rank_scores = model.compute_rank_score(inputs)
             single_input_scores.append(rank_scores.cpu().numpy())
             y_true.append(label.cpu().numpy())
         nb_eval_steps += 1
