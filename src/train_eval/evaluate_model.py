@@ -10,6 +10,57 @@ from src.data_prep import PairwiseDataset, SingletonDataset
 from src.model import PairwiseRanker 
 from src.train_eval import pairwise_loss
 
+import numpy as np
+
+def compute_pairwise_ltr_auc(vul_scores: np.ndarray, benign_scores: np.ndarray) -> float:
+    """
+    Compute the AUC (Area Under the Curve) using pairwise comparisons
+    as per the Wilcoxon-Mann-Whitney (WMW) statistic.
+
+    Parameters:
+    - vul_scores: numpy array of positive point scores.
+    - benign_scores: numpy array of negative point scores.
+
+    Returns:
+    - AUC value (float).
+    """
+    num_positives = len(vul_scores)
+    num_negatives = len(benign_scores)
+
+    # Count the number of correct pairwise orderings for all possible pairs
+    correct_orderings = np.sum(vul_scores[:, None] > benign_scores[None, :])
+
+    # Total number of pairs
+    total_pairs = num_positives * num_negatives
+    
+    # Compute AUC
+    auc = correct_orderings / total_pairs
+    return auc
+
+def compute_pairwise_ltr_indexed_accuracy(vul_scores: np.ndarray, benign_scores: np.ndarray) -> float:
+    """
+    Compute the accuracy by comparing scores at the same index
+    between `vul_scores` and `benign_scores`.
+
+    Parameters:
+    - vul_scores: numpy array of positive point scores.
+    - benign_scores: numpy array of negative point scores.
+
+    Returns:
+    - Accuracy (float).
+    """
+    # Ensure the arrays have the same length
+    if len(vul_scores) != len(benign_scores):
+        raise ValueError("Arrays must have the same length for indexed comparison.")
+    
+    # Compare pairs at the same index
+    correct_count = np.sum(vul_scores > benign_scores)
+
+    # Compute accuracy as the proportion of correct comparisons
+    accuracy = correct_count / len(vul_scores)
+    return accuracy
+
+
 def calculate_pairwise_metrics(vul_scores: np.array, benign_scores: np.array) -> dict[str, float]:
     """
     Calculate model pairwise performance metrics based on vulnerable/benign pairs of model output scores.
@@ -22,15 +73,14 @@ def calculate_pairwise_metrics(vul_scores: np.array, benign_scores: np.array) ->
     """
 
     # Compute accuracy
-    correct_pairs = 0
-    total_pairs = 0
-    for score_vuln, score_benign in zip(vul_scores, benign_scores):
-        if score_vuln > score_benign: # Check if pair is ranked correctly
-            correct_pairs += 1
-        total_pairs += 1
-    accuracy = correct_pairs / total_pairs
+    accuracy = compute_pairwise_ltr_indexed_accuracy(vul_scores, benign_scores)
+    # Compute AUC
+    roc_auc = compute_pairwise_ltr_auc(vul_scores, benign_scores)
 
-    result = {"eval_pairwise_acc": round(accuracy,4)*100}
+    result = {
+        "eval_pairwise_acc": round(accuracy,4)*100,
+        "eval_pairwise_roc_auc": round(roc_auc,4)*100
+    }
     return result
 
 

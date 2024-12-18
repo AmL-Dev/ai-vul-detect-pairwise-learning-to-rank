@@ -33,7 +33,8 @@ def train(args, train_dataset, model):
     # ============================
 
     # Track gradients
-    wandb.watch(model, pairwise_loss, log="all", log_freq=5)
+    if args.log_to_wandb:
+        wandb.watch(model, pairwise_loss, log="all", log_freq=5)
 
     # Randomly batch the training dataset 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu) # Set batch size
@@ -111,18 +112,10 @@ def train(args, train_dataset, model):
             # log_gradients(model, epoch, global_step, LOGGER)
 
             ### Update training stats and move to prepare moving to the next iteration
-            # cumul_train_loss+=loss.item()
-            # avg_loss = round(cumul_train_loss/(local_step + 1),5) #if avg_loss!=0 else tr_loss
             bar.set_description(f"Epoch {epoch}, Step {global_step}, Loss: {loss}")
             # log metrics to wandb
-            wandb.log({"train_loss": loss}, step=global_step)
-
-            # Tracks the exponential rate of change in the training loss over a specific number of steps. 
-            # Useful to monitor a smoothed loss trend in training processes.
-            # avg_loss=round(np.exp((tr_loss - logging_loss) /(global_step + 1 - tr_nb)),4)
-            # if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
-            #     logging_loss = tr_loss
-            #     tr_nb=global_step
+            if args.log_to_wandb:
+                wandb.log({"train_loss": loss}, step=global_step)
 
 
             ### Log after every logging_steps and save model if better performance
@@ -144,7 +137,8 @@ def train(args, train_dataset, model):
                     LOGGER.info("  %s = %s", key, round(value,4))
 
                 # log validation metrics to wandb
-                wandb.log(results, step=global_step)
+                if args.log_to_wandb:
+                    wandb.log(results, step=global_step)
 
                 # Save model checkpoint    
                 if results['eval_f1']>best_f1:
@@ -193,7 +187,8 @@ def train(args, train_dataset, model):
                     LOGGER.info("  %s = %s", key, round(value,4))
                 
                 # log validation metrics to wandb
-                wandb.log(results, step=global_step)
+                if args.log_to_wandb:
+                    wandb.log(results, step=global_step)
 
                 # Save model checkpoint    
                 if results['eval_f1']>best_f1:

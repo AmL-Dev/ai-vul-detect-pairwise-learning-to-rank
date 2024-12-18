@@ -2,6 +2,7 @@
 # Sign in to Hugging Face by running this command: huggingface-cli login
 # 
 # Set project location to be able to call project modules 
+from contextlib import nullcontext
 import sys
 sys.path.append("/mnt/isgnas/home/anl31/documents/code/ai-vul-detect-pairwise-learning-to-rank")
 
@@ -36,7 +37,7 @@ def main(args):
     with wandb.init(
         # set the wandb project where this run will be logged
         project="ai-vul-detect-pairwise-learning-to-rank",
-
+        name=f"codebertFC_epochs{args.nb_epochs}_batch{args.train_batch_size}_lr{args.learning_rate}{"_frozenEmbed" if args.freeze_embedder else ""}",
         # track hyperparameters and run metadata
         config={
             "architecture": f"{args.huggingface_embedder_name} + FC",
@@ -45,7 +46,7 @@ def main(args):
             "epochs": args.nb_epochs,
             "batch_size": args.train_batch_size,
         }
-    ):
+    ) if args.log_to_wandb else nullcontext():
 
         # ============================
         # Load model and tokenizer
@@ -57,6 +58,10 @@ def main(args):
 
         tokenizer = AutoTokenizer.from_pretrained(args.huggingface_embedder_name)
         encoder = AutoModel.from_pretrained(args.huggingface_embedder_name).to(args.device)
+        # Freeze all the weights in the encoder
+        if args.freeze_embedder:
+            for param in encoder.parameters():
+                param.requires_grad = False
 
         model = PairwiseRanker(tokenizer, encoder, args.device)
 
@@ -111,10 +116,12 @@ def main(args):
                 LOGGER.info("  %s = %s", key, str(round(test_results[key],4)))
             
             # log test metrics to wandb
-            # wandb.log(test_results)
-            # log validation metrics to wandb
-            wandb.log({"test_loss": test_results['eval_loss']})
-            wandb.log({"test_pairwise_acc": test_results['eval_pairwise_acc']})
+            if args.log_to_wandb:
+                wandb.log({"test_loss": test_results['eval_loss']})
+                wandb.log({"test_pairwise_acc": test_results['eval_pairwise_acc']})
+                wandb.log({"test_pairwise_roc_auc": test_results['eval_pairwise_roc_auc']})
+                wandb.log({"test_f1": test_results['eval_f1']})
+                wandb.log({"test_roc_auc": test_results['eval_roc_auc']})
 
 
 
@@ -172,6 +179,8 @@ if __name__ == "__main__":
                         help="Number of training epochs.")
     parser.add_argument("--max_grad_norm", default=1.0, type=float,
                         help="Max gradient norm (to prevent exploding gradients).") # Optional
+    parser.add_argument("--freeze_embedder", action='store_true',
+                        help="Whether to run training.") # Optional
     # Track results and training stats
     parser.add_argument("--output_dir", required=True, type=str,
                         help="The output directory where the model predictions and checkpoints will be written.")
@@ -179,6 +188,9 @@ if __name__ == "__main__":
                         help="Run evaluation during training at each logging step.")
     parser.add_argument('--logging_steps', type=int, default=512,
                         help="Log every X updates steps.") # Optional
+    parser.add_argument('--log_to_wandb', action='store_true',
+                        help="Log run to weights and biases (requires to be login to wandb locally).") # Optional
+    
     
 
     # Parse arguments
