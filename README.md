@@ -38,6 +38,11 @@ The goal of this project is to
     - [tiktoken (0.8.0)](https://pypi.org/project/tiktoken/)
     - [sentencepiece (0.2.0)](https://pypi.org/project/sentencepiece/)
     - [protobuf (5.29.1)](https://protobuf.dev/getting-started/pythontutorial/)
+- For NV-Embed:
+    - [einops (0.8.0)]
+    - [datasets (3.2.0)]
+- For dunzhang/stella_en_400M_v5:
+    - [xformers (0.0.29)]
 <!-- - [pandas (2.2.3)](https://pandas.pydata.org/) -->
 <!-- - [tqm (4.67.1)](https://tqdm.github.io/) -->
 

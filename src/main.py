@@ -13,7 +13,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import argparse
 import torch
-from transformers import AutoTokenizer, AutoModel
+from transformers import AutoTokenizer, AutoModel, AutoModelForSeq2SeqLM
 import wandb
 
 from src.utils import LOGGER
@@ -37,14 +37,15 @@ def main(args):
     with wandb.init(
         # set the wandb project where this run will be logged
         project="ai-vul-detect-pairwise-learning-to-rank",
-        name=f"codebertFC_epochs{args.nb_epochs}_batch{args.train_batch_size}_lr{args.learning_rate}{"_frozenEmbed" if args.freeze_embedder else ""}",
+        name=f"Stella_400M_FC2_LogisticLoss_epochs{args.nb_epochs}_batch{args.train_batch_size}_lr{args.learning_rate}{"_frozenEmbed" if args.freeze_embedder else ""}",
         # track hyperparameters and run metadata
         config={
-            "architecture": f"{args.huggingface_embedder_name} + FC",
+            "architecture": f"Stella_400M frozen + FC2 + LogisticLoss",
             "dataset": {args.primevul_paired_train_data_file},
             "learning_rate": args.learning_rate,
             "epochs": args.nb_epochs,
             "batch_size": args.train_batch_size,
+            "weight_initialization": "Xavier"
         }
     ) if args.log_to_wandb else nullcontext():
 
@@ -56,8 +57,11 @@ def main(args):
         if args.local_rank not in [-1, 0]:
             torch.distributed.barrier()  # Barrier to make sure only the first process in distributed training download model & vocab
 
-        tokenizer = AutoTokenizer.from_pretrained(args.huggingface_embedder_name)
-        encoder = AutoModel.from_pretrained(args.huggingface_embedder_name).to(args.device)
+        tokenizer = AutoTokenizer.from_pretrained(args.huggingface_embedder_name, trust_remote_code=True)
+        ### CodeBert
+        encoder = AutoModel.from_pretrained(args.huggingface_embedder_name, trust_remote_code=True).to(args.device)
+        ### CodeT5
+        # encoder = AutoModelForSeq2SeqLM.from_pretrained(args.huggingface_embedder_name).to(args.device)
         # Freeze all the weights in the encoder
         if args.freeze_embedder:
             for param in encoder.parameters():
@@ -98,10 +102,13 @@ def main(args):
         # Testing
         # ============================
         if args.do_test and args.local_rank in [-1, 0]:
-            checkpoint_prefix = f'checkpoint-best-f1/model.bin'
-            output_dir = os.path.join(args.output_dir, '{}'.format(checkpoint_prefix))  
-            model.load_state_dict(torch.load(output_dir))                  
-            model.to(args.device)
+            # Load back the model with the best evaluation score 
+            if args.evaluate_during_training:
+                checkpoint_prefix = f'checkpoint-best-pairwise-roc-auc/model.bin'
+                output_dir = os.path.join(args.output_dir, '{}'.format(checkpoint_prefix))  
+                model.load_state_dict(torch.load(output_dir))                  
+                model.to(args.device)
+            
             test_results=test(
                 model,
                 args.primevul_paired_test_data_file,
@@ -117,13 +124,10 @@ def main(args):
             
             # log test metrics to wandb
             if args.log_to_wandb:
-                wandb.log({"test_loss": test_results['eval_loss']})
-                wandb.log({"test_pairwise_acc": test_results['eval_pairwise_acc']})
-                wandb.log({"test_pairwise_roc_auc": test_results['eval_pairwise_roc_auc']})
-                wandb.log({"test_f1": test_results['eval_f1']})
-                wandb.log({"test_roc_auc": test_results['eval_roc_auc']})
+                wandb.log(test_results)
 
 
+LOGGER.info("RUNNING PAIRWISE LTR")
 
 if __name__ == "__main__":
 
@@ -180,7 +184,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_grad_norm", default=1.0, type=float,
                         help="Max gradient norm (to prevent exploding gradients).") # Optional
     parser.add_argument("--freeze_embedder", action='store_true',
-                        help="Whether to run training.") # Optional
+                        help="Whether to freeze weights of embedder.") # Optional
     # Track results and training stats
     parser.add_argument("--output_dir", required=True, type=str,
                         help="The output directory where the model predictions and checkpoints will be written.")

@@ -23,9 +23,77 @@ from torch.utils.data import DataLoader, RandomSampler
 from torch.utils.data.distributed import DistributedSampler
 
 from src.utils import LOGGER
-from src.train_eval import validate, pairwise_loss
+from src.model import  PairwiseRanker
+from src.data_prep import PairwiseDataset
+from src.train_eval import validate, pairwise_loss, calculate_pairwise_metrics
 
-def train(args, train_dataset, model):
+
+def train_one_epoch(model: PairwiseRanker, train_dataloader: DataLoader, optimizer, args, epoch: int):
+    """
+    Train the model for one epoch.
+
+    Args:
+        model: The model being trained.
+        train_dataloader: DataLoader for training data.
+        optimizer: Optimizer for gradient updates.
+        args: Training arguments (assumed to have attributes like n_gpu, max_grad_norm, log_to_wandb).
+        epoch: Current epoch.
+
+    Returns:
+        avg_loss: Average loss for the epoch.
+        metrics: Dictionary of training metrics.
+    """
+    LOGGER.info(f"***** Training epoch {epoch} *****")
+    LOGGER.info("  Num iteration = %d", len(train_dataloader))
+
+    model.train()
+    train_loss_list = []
+    vul_scores_list = []
+    benign_scores_list = []
+
+    bar = tqdm(train_dataloader, total=len(train_dataloader), desc="Training")
+    for local_step, batch in enumerate(bar):
+        code_vulnerable = batch["vulnerable_code"]
+        code_benign = batch["benign_code"]
+
+        # Forward pass
+        score_vuln, score_benign = model(code_vulnerable, code_benign)
+
+        # Calculate loss
+        loss = pairwise_loss(score_vuln, score_benign)
+        if args.n_gpu > 1:
+            loss = loss.mean()  # Average loss across GPUs
+
+        # Backpropagation
+        optimizer.zero_grad() # Clear gradients for next train
+        loss.backward() # Compute gradients
+        torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm) # Prevent exploding gradients
+        optimizer.step() # Apply gradients
+
+        # Update training stats
+        train_loss_list.append(loss.item())
+        vul_scores_list.append(score_vuln.detach().cpu().numpy())
+        benign_scores_list.append(score_benign.detach().cpu().numpy())
+        bar.set_description(f"Epoch {epoch}, Epoch Step {local_step}, Loss: {loss.item():.4f}")
+
+    # Compute average loss
+    median_loss = np.median(train_loss_list)
+
+    # Concatenate scores for metric calculation
+    vul_scores = np.concatenate(vul_scores_list, axis=0)
+    benign_scores = np.concatenate(benign_scores_list, axis=0)
+
+    # Calculate training metrics
+    pairwise_metrics = calculate_pairwise_metrics(vul_scores, benign_scores, "train")
+
+    result = {"train_loss": float(median_loss)}
+    result.update(pairwise_metrics)
+
+    return result
+
+
+
+def train(args, train_dataset: PairwiseDataset, model: PairwiseRanker):
     """ Train the model """ 
     
     # ============================
@@ -78,88 +146,28 @@ def train(args, train_dataset, model):
     LOGGER.info("  Total train batch size (w. parallel, distributed & accumulation) = %d",
                 args.train_batch_size * (torch.distributed.get_world_size() if args.local_rank != -1 else 1))
 
-    global_step = args.start_step
-    avg_loss = 0.0
     best_f1=0.0
-    best_acc=0.0
+    best_pairwise_roc_auc=0.0
     patience = 0
     
     # ============================
     # Actual training
     # ============================
     for epoch in range(args.start_epoch, int(args.num_train_epochs)): 
-        bar = tqdm(train_dataloader,total=len(train_dataloader))
-        cumul_train_loss=0 # Tracks cumulative loss
-        for local_step, batch in enumerate(bar):
-            code_vulnerable = batch["vulnerable_code"]
-            code_benign = batch["benign_code"]
-            
-            ### Forward pass and loss
-            score_vuln, score_benign = model(code_vulnerable, code_benign)
-            
-            loss = pairwise_loss(score_vuln, score_benign)
-            if args.n_gpu > 1:
-                loss = loss.mean()  # mean() to average on multi-gpu parallel training
-
-            ### Gradient descent
-            optimizer.zero_grad() # Clear gradients for next train
-            loss.backward() # Backpropagation, compute gradients
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm) # Prevent exploding gradients
-            optimizer.step() # Apply gradients
-                              
-            # Log gradients stats
-            ######################################################################################################################################
-            # log_gradients(model, epoch, global_step, LOGGER)
-
-            ### Update training stats and move to prepare moving to the next iteration
-            bar.set_description(f"Epoch {epoch}, Step {global_step}, Loss: {loss}")
-            # log metrics to wandb
-            if args.log_to_wandb:
-                wandb.log({"train_loss": loss}, step=global_step)
-
-
-            ### Log after every logging_steps and save model if better performance
-            if (global_step + 1) % args.logging_steps == 0 and args.local_rank == -1 and args.evaluate_during_training: # Only evaluate when single GPU otherwise metrics may not average well
-
-                ### Evaluate model
-                # Valid perf
-                results = validate(
-                    model, 
-                    args.primevul_paired_valid_data_file, 
-                    args.primevul_single_input_valid_dataset,
-                    args.eval_batch_size,
-                    args.local_rank,
-                    args.n_gpu,
-                    args.device,
-                    eval_when_training=True)
-                
-                for key, value in results.items():
-                    LOGGER.info("  %s = %s", key, round(value,4))
-
-                # log validation metrics to wandb
-                if args.log_to_wandb:
-                    wandb.log(results, step=global_step)
-
-                # Save model checkpoint    
-                if results['eval_f1']>best_f1:
-                    best_f1=results['eval_f1']
-                    LOGGER.info("  "+"*"*20)  
-                    LOGGER.info("  Best f1:%s",round(best_f1,4))
-                    LOGGER.info("  "+"*"*20)                          
-                    
-                    checkpoint_prefix = f'checkpoint-best-f1/'
-                    output_dir = os.path.join(args.output_dir, '{}'.format(checkpoint_prefix))                        
-                    if not os.path.exists(output_dir):
-                        os.makedirs(output_dir)                        
-                    model_to_save = model.module if hasattr(model,'module') else model
-                    output_dir = os.path.join(output_dir, f'model.bin') 
-                    torch.save(model_to_save.state_dict(), output_dir)
-                    LOGGER.info(f"Saving best f1 model checkpoint at epoch {epoch} step {global_step} to {output_dir}")   
-
-            # increment global step
-            global_step += 1
         
-        ### log after every epoch
+        ### Train model for one epoch
+        train_reults = train_one_epoch(model, train_dataloader, optimizer, args, epoch)
+
+
+        ### Log Model Performance After Every Epoch
+
+        # Log training scores
+        for key, value in train_reults.items():
+            LOGGER.info("  %s = %s", key, round(value,4))
+        if args.log_to_wandb:
+            wandb.log(train_reults, step=epoch)
+
+        # Log validation scores
         if args.local_rank in [-1, 0]:
             # save model checkpoint at ep10
             if epoch == 9:
@@ -173,28 +181,46 @@ def train(args, train_dataset, model):
                 LOGGER.info(f"ACSAC: Saving model checkpoint at epoch {epoch} to {output_dir}")
 
             if args.local_rank == -1 and args.evaluate_during_training:  # Only evaluate when single GPU otherwise metrics may not average well
-                results = validate(
+                validation_results = validate(
                     model, 
                     args.primevul_paired_valid_data_file, 
                     args.primevul_single_input_valid_dataset,
-                    args.eval_batch_size,
+                    args.per_gpu_eval_batch_size,
                     args.local_rank,
                     args.n_gpu,
                     args.device,
                     eval_when_training=True)
                 
-                for key, value in results.items():
+                for key, value in validation_results.items():
                     LOGGER.info("  %s = %s", key, round(value,4))
                 
                 # log validation metrics to wandb
                 if args.log_to_wandb:
-                    wandb.log(results, step=global_step)
+                    wandb.log(validation_results, step=epoch)
 
                 # Save model checkpoint    
-                if results['eval_f1']>best_f1:
-                    best_f1=results['eval_f1']
+                if validation_results['validation_pairwise_roc_auc']>best_pairwise_roc_auc:
+                    best_pairwise_roc_auc=validation_results['validation_pairwise_roc_auc']
                     LOGGER.info("  "+"*"*20)  
-                    LOGGER.info("  Best f1:%s",round(best_f1,4))
+                    LOGGER.info("  Best Pairwise ROC AUC: %s",round(best_pairwise_roc_auc,4))
+                    LOGGER.info("  "+"*"*20)                          
+                    
+                    checkpoint_prefix = f'checkpoint-best-pairwise-roc-auc/'
+                    output_dir = os.path.join(args.output_dir, '{}'.format(checkpoint_prefix))                        
+                    if not os.path.exists(output_dir):
+                        os.makedirs(output_dir)                        
+                    model_to_save = model.module if hasattr(model,'module') else model
+                    output_dir = os.path.join(output_dir, f'model.bin') 
+                    torch.save(model_to_save.state_dict(), output_dir)
+                    LOGGER.info(f"Saving best Pairwise ROC AUC model checkpoint at epoch {epoch} to {output_dir}")
+                    patience = 0
+                else:
+                    patience += 1
+
+                if validation_results['validation_f1']>best_f1:
+                    best_f1=validation_results['validation_f1']
+                    LOGGER.info("  "+"*"*20)
+                    LOGGER.info("  Best f1: %s",round(best_f1,4))
                     LOGGER.info("  "+"*"*20)                          
                     
                     checkpoint_prefix = f'checkpoint-best-f1/'
@@ -207,31 +233,13 @@ def train(args, train_dataset, model):
                     LOGGER.info(f"Saving best f1 model checkpoint at epoch {epoch} to {output_dir}")
                     patience = 0
                 else:
-                    patience += 1
-
-                if results['eval_acc']>best_acc:
-                    best_acc=results['eval_acc']
-                    LOGGER.info("  "+"*"*20)
-                    LOGGER.info("  Best acc:%s",round(best_acc,4))
-                    LOGGER.info("  "+"*"*20)                          
-                    
-                    checkpoint_prefix = f'checkpoint-best-acc/'
-                    output_dir = os.path.join(args.output_dir, '{}'.format(checkpoint_prefix))                        
-                    if not os.path.exists(output_dir):
-                        os.makedirs(output_dir)                        
-                    model_to_save = model.module if hasattr(model,'module') else model
-                    output_dir = os.path.join(output_dir, f'model.bin') 
-                    torch.save(model_to_save.state_dict(), output_dir)
-                    LOGGER.info(f"Saving best acc model checkpoint at epoch {epoch} to {output_dir}")
-                    patience = 0
-                else:
                     patience += 1 
 
         ### Stop training if model does not improve after multiple epochs
         if patience == args.max_patience:
             LOGGER.info(f"Reached max patience {args.max_patience}. End training now.")
-            if best_f1 == 0.0:
-                checkpoint_prefix = f'checkpoint-best-f1/'
+            if best_pairwise_roc_auc == 0.0:
+                checkpoint_prefix = f'checkpoint-best-pairwise-roc-auc/'
                 output_dir = os.path.join(args.output_dir, '{}'.format(checkpoint_prefix))                        
                 if not os.path.exists(output_dir):
                     os.makedirs(output_dir)                        
@@ -240,25 +248,3 @@ def train(args, train_dataset, model):
                 torch.save(model_to_save.state_dict(), output_dir)
                 LOGGER.info("Saving model checkpoint to %s", output_dir)
             break
-
-
-def log_gradients(model, epoch, step, logger=None):
-    """
-    Logs the gradients of model parameters, including L2 norms.
-    If `logger` is provided, logs will be sent there. Otherwise, prints to stdout.
-    """
-    for name, param in model.named_parameters():
-        if param.grad is not None:
-            grad_mean = param.grad.mean().item()
-            grad_std = param.grad.std().item()
-            grad_max = param.grad.max().item()
-            grad_min = param.grad.min().item()
-            grad_norm = param.grad.norm(2).item()  # L2 norm of gradients
-            message = (f"Epoch {epoch}, Step {step}, Param: {name}, "
-                       f"Grad Mean: {grad_mean:.4e}, Grad Std: {grad_std:.4e}, "
-                       f"Grad Max: {grad_max:.4e}, Grad Min: {grad_min:.4e}, "
-                       f"Grad Norm (L2): {grad_norm:.4e}")
-            if logger:
-                logger.info(message)
-            else:
-                print(message)
