@@ -5,6 +5,7 @@
 
 # Output folder
 model_checkpoints/*
+runs/*
 
 
 # User-specific files

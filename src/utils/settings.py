@@ -14,6 +14,6 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                         datefmt='%m/%d/%Y %H:%M:%S',
                         level=logging.INFO)
-LOGGER = logging.getLogger(__name__)
+LOGGER = logging.getLogger("Pairwise LTR")
 """ logging.Logger: `Logger` instance used throughout the application.
 """

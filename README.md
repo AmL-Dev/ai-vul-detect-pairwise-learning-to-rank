@@ -32,6 +32,17 @@ The goal of this project is to
 - [Pytorch (2.5.1)](https://pypi.org/project/torch/)
 - [scikit-learn (1.5.2)](https://pypi.org/project/scikit-learn/)
 - [numpy]
+- [wandb (0.19.1)](): login with ```wandb login```
+<!-- - [tensorboard (2.18.0)](): activate tensorboard with: ```tensorboard --logdir=runs``` -->
+- For BigBird:
+    - [tiktoken (0.8.0)](https://pypi.org/project/tiktoken/)
+    - [sentencepiece (0.2.0)](https://pypi.org/project/sentencepiece/)
+    - [protobuf (5.29.1)](https://protobuf.dev/getting-started/pythontutorial/)
+- For NV-Embed:
+    - [einops (0.8.0)]
+    - [datasets (3.2.0)]
+- For dunzhang/stella_en_400M_v5:
+    - [xformers (0.0.29)]
 <!-- - [pandas (2.2.3)](https://pandas.pydata.org/) -->
 <!-- - [tqm (4.67.1)](https://tqdm.github.io/) -->
 
