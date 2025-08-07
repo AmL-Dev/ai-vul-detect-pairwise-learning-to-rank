@@ -5,7 +5,8 @@
 
 # Output folder
 model_checkpoints/*
-runs/*
+runs/
+qwen_ranker_test/
 
 
 # User-specific files
