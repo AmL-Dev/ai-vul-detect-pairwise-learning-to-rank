@@ -49,10 +49,14 @@ class TrainingConfig:
     num_train_epochs: int = 5
     margin: float = 1.0
     
+    # Data configuration
+    use_non_related_pairs: bool = False
+    non_related_ratio: float = 0.3  # Ratio of non-related pairs to include
+    
     # Logging and saving
     logging_steps: int = 1
     eval_steps: int = 5
-    save_steps: int = 10
+    save_strategy: str = "epoch"  # Save on epochs instead of steps
     save_total_limit: int = 2
     wandb_run_name: str = "ltr_Qwen2.5-Coder-32B_r16_a32_lr1e-4_batch8_epoch5_16pts"
     wandb_project: str = "ai-vul-detect-pairwise-ltr-lora"
@@ -145,6 +149,27 @@ class DataManager:
         self.config = config
         self.logger = logger
     
+    def create_non_related_pairs(self, code_pairs: List[CodePair]) -> List[CodePair]:
+        """Create non-related pairs by mixing vulnerable and benign code from different sources."""
+        self.logger.info("Creating non-related pairs...")
+        
+        # Create non-related pairs
+        non_related_pairs = []
+        for i, pair1 in enumerate(code_pairs):
+            # Pair with a different code pair (avoid same index)
+            for j, pair2 in enumerate(code_pairs):
+                if i != j:  # Ensure they're from different sources
+                    non_related_pairs.append(CodePair(
+                        vulnerable=pair1.vulnerable,
+                        benign=pair2.benign,
+                        vul_id=f"{pair1.vul_id}_mixed_{pair2.vul_id}",
+                        vulnerable_hash=pair1.vulnerable_hash,
+                        benign_hash=pair2.benign_hash
+                    ))
+        
+        self.logger.info(f"Created {len(non_related_pairs)} non-related pairs")
+        return non_related_pairs
+    
     def load_datasets(self, tokenizer: PreTrainedTokenizer) -> Tuple[PairwiseCodeDataset, PairwiseCodeDataset, List[CodePair]]:
         """Load training, evaluation, and test datasets."""
         self.logger.info("Loading datasets...")
@@ -154,6 +179,23 @@ class DataManager:
             train_pairs = load_primevul_pairs(self.config.train_data_path)
             eval_pairs = load_primevul_pairs(self.config.eval_data_path)
             test_pairs = load_primevul_pairs(self.config.test_data_path)
+            
+            # Optionally create non-related pairs for training
+            if self.config.use_non_related_pairs:
+                train_non_related = self.create_non_related_pairs(train_pairs)
+                # Mix related and non-related pairs
+                mix_ratio = 1.0 - self.config.non_related_ratio
+                num_related = int(len(train_pairs) * mix_ratio)
+                num_non_related = len(train_pairs) - num_related
+                
+                # Sample non-related pairs
+                import random
+                random.shuffle(train_non_related)
+                selected_non_related = train_non_related[:num_non_related]
+                
+                # Combine related and non-related pairs
+                train_pairs = train_pairs[:num_related] + selected_non_related
+                self.logger.info(f"Using {num_related} related pairs and {num_non_related} non-related pairs for training")
             
             # Create datasets
             train_dataset = PairwiseCodeDataset(train_pairs, tokenizer, self.config.max_length)
@@ -365,10 +407,10 @@ class TrainingPipeline:
                 fp16=True,
                 logging_steps=self.config.logging_steps,
                 eval_steps=self.config.eval_steps,
-                eval_strategy="no",  # Disable built-in evaluation to avoid conflicts
-                save_steps=self.config.save_steps,
+                # eval_strategy="no",  # Disable automatic evaluation
+                save_strategy=self.config.save_strategy,
                 save_total_limit=self.config.save_total_limit,
-                load_best_model_at_end=False,
+                load_best_model_at_end=False,  # Disable since we're not using built-in evaluation
                 remove_unused_columns=False,
                 report_to="wandb",
                 run_name=self.config.wandb_run_name,
@@ -378,62 +420,42 @@ class TrainingPipeline:
             
             # Custom evaluation function for trainer
             def compute_metrics_for_trainer(eval_pred: EvalPrediction) -> Dict[str, float]:
-                """Custom metrics computation for trainer's built-in evaluation."""
-                # Return empty dict to avoid issues with built-in evaluation
-                # Our custom evaluation happens in the callback
-                return {}
+                # This won't be used since we disabled automatic evaluation
+                return {"eval_custom": 0.0}
             
-            # Initialize trainer with disabled built-in evaluation
+            # Initialize trainer
             trainer = PairwiseTrainer(
                 config=self.config,
                 logger=self.logger,
                 model=model,
                 args=training_args,
                 train_dataset=train_dataset,
-                # Remove eval_dataset to avoid input_ids conflict
+                # Remove eval_dataset since we handle evaluation manually
                 data_collator=collate_fn,
             )
             
-            # Custom callback for step-based evaluation
-            class StepBasedEvaluationCallback(TrainerCallback):
-                def __init__(self, evaluator, tokenizer, eval_data_path, logger, eval_steps):
+            # Add callback for evaluation after each epoch
+            class EvaluationCallback(TrainerCallback):
+                def __init__(self, evaluator, tokenizer, logger):
                     self.evaluator = evaluator
                     self.tokenizer = tokenizer
-                    self.eval_data_path = eval_data_path
                     self.logger = logger
-                    self.eval_steps = eval_steps
-                    self.eval_pairs_data = None
                 
-                def on_step_end(self, args, state, control, model=None, **kwargs):
-                    """Called after each training step to check if evaluation should run."""
-                    # Check if we should evaluate at this step
-                    if state.global_step % self.eval_steps == 0:
-                        try:
-                            # Load eval data if not already loaded
-                            if self.eval_pairs_data is None:
-                                self.eval_pairs_data = load_primevul_pairs(self.eval_data_path)
-                            
-                            # Run custom evaluation
-                            eval_metrics = self.evaluator.evaluate_model(
-                                model, self.tokenizer, self.eval_pairs_data, "validation"
-                            )
-                            
-                            # Log to wandb
-                            wandb.log({
-                                **eval_metrics, 
-                                "step": state.global_step,
-                                "epoch": state.epoch
-                            })
-                            
-                            self.logger.info(f"Step {state.global_step} evaluation completed")
-                            
-                        except Exception as e:
-                            self.logger.error(f"Error during step-based evaluation: {str(e)}")
+                def on_epoch_end(self, args, state, control, model=None, **kwargs):
+                    try:
+                        # Evaluate on validation set
+                        eval_pairs_data = load_primevul_pairs(self.evaluator.config.eval_data_path)
+                        eval_metrics = self.evaluator.evaluate_model(
+                            model, self.tokenizer, eval_pairs_data, "validation_epoch"
+                        )
+                        # Log to wandb
+                        wandb.log({**eval_metrics, "epoch": state.epoch})
+                        self.logger.info(f"Epoch {state.epoch} validation completed")
+                    except Exception as e:
+                        self.logger.error(f"Error during epoch-end evaluation: {str(e)}")
             
-            # Add the step-based evaluation callback
-            callback = StepBasedEvaluationCallback(
-                self.evaluator, tokenizer, self.config.eval_data_path, self.logger, self.config.eval_steps
-            )
+            # Add the callback
+            callback = EvaluationCallback(self.evaluator, tokenizer, self.logger)
             trainer.add_callback(callback)
             
             # Start training
@@ -459,6 +481,7 @@ class TrainingPipeline:
             raise
 
 
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description="Train pairwise LTR model for vulnerability detection")
@@ -477,9 +500,11 @@ def main():
     parser.add_argument('--learning_rate', type=float, default=1e-4)
     parser.add_argument('--num_train_epochs', type=int, default=5)
     parser.add_argument('--margin', type=float, default=1.0)
+    parser.add_argument('--use_non_related_pairs', action='store_true', help='Use non-related pairs in training')
+    parser.add_argument('--non_related_ratio', type=float, default=0.3, help='Ratio of non-related pairs to include')
     parser.add_argument('--logging_steps', type=int, default=1)
     parser.add_argument('--eval_steps', type=int, default=5)
-    parser.add_argument('--save_steps', type=int, default=10)
+    parser.add_argument('--save_strategy', type=str, default="epoch", choices=["epoch", "steps"], help='Save strategy: "epoch" or "steps"')
     parser.add_argument('--save_total_limit', type=int, default=2)
     parser.add_argument('--wandb_run_name', type=str, default="ltr_Qwen2.5-Coder-32B_r16_a32_lr1e-4_batch8_epoch5_16pts")
     parser.add_argument('--wandb_project', type=str, default="ai-vul-detect-pairwise-ltr-lora")
@@ -502,9 +527,11 @@ def main():
         learning_rate=args.learning_rate,
         num_train_epochs=args.num_train_epochs,
         margin=args.margin,
+        use_non_related_pairs=args.use_non_related_pairs,
+        non_related_ratio=args.non_related_ratio,
         logging_steps=args.logging_steps,
         eval_steps=args.eval_steps,
-        save_steps=args.save_steps,
+        save_strategy=args.save_strategy,
         save_total_limit=args.save_total_limit,
         wandb_run_name=args.wandb_run_name,
         wandb_project=args.wandb_project
